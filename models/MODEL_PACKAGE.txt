@@ -1,0 +1,56 @@
+Translation models are loaded only from this folder.
+The application does not download a model and does not contact the network.
+
+When models/gemma-4-e4b/engine.json is present, that package is the only
+one loaded. models/opus-mt-ur-en/ and models/indictrans2-indic-en/ stay on
+disk and are not selected. A missing Gemma GGUF stops translation. It does
+not switch to another engine. Weights stay in the model folder, beside the
+program, and are not packed into the executable.
+
+Place each model in its own subfolder. The subfolder must contain an
+engine.json file plus the local model files that its backend expects.
+
+Two roles are recognized:
+
+    "role": "literal"      close Urdu-to-English wording
+    "role": "contextual"   natural English, with the previous line when a reply is short
+
+A package with no role is treated as literal. The window does not contain
+a model name. It loads the literal package and, when one is ready, the
+contextual package. If the contextual weights are missing, contextual English
+uses the literal model and says so in the status bar.
+
+Example layout:
+
+    models/
+      terminology.json
+      opus-mt-ur-en/
+        engine.json          role literal, backend marian
+      indictrans2-indic-en/
+        engine.json          role contextual, backend indictrans2
+
+engine.json:
+
+    {
+      "name": "Local Urdu to English",
+      "backend": "marian",
+      "role": "literal",
+      "source_language": "ur",
+      "target_language": "en",
+      "default": true,
+      "device": "auto",
+      "batch_size": 8,
+      "terminology": "terminology.json"
+    }
+
+device may be auto, cpu, or cuda. terminology.json in this folder is shared.
+A model folder may also contain its own terminology.json. Entries are
+name, place, technical, expression, or user. Names, places, and technical
+terms are replaced when they stand alone as words. Expressions are not
+forced inside a longer contextual sentence.
+
+See docs/model-assessment.md before copying a large checkpoint.
+OPUS-MT weights belong in models/opus-mt-ur-en/.
+IndicTrans2 distilled weights belong in models/indictrans2-indic-en/.
+Do not copy NLLB (CC-BY-NC) or the 11.8 GB MADLAD float32 file into this folder
+for this application.

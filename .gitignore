@@ -1,0 +1,51 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.log
+build/
+dist/
+*.egg-info/
+
+# Personal test documents
+1.DOCX
+.~lock.*
+
+# Python environment and cache
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Local model files
+*.gguf
+*.gguf.part
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+
+
+evaluation/results/
+
+# Downloaded weight files stay on disk. Package instructions stay in git.
+models/*
+!models/MODEL_PACKAGE.txt
+!models/terminology.json
+!models/opus-mt-ur-en/
+models/opus-mt-ur-en/*
+!models/opus-mt-ur-en/engine.json
+!models/opus-mt-ur-en/terminology.json
+!models/opus-mt-ur-en/NOTICE.txt
+!models/indictrans2-indic-en/
+models/indictrans2-indic-en/*
+!models/indictrans2-indic-en/engine.json
+!models/indictrans2-indic-en/NOTICE.txt
+!models/gemma-4-e4b/
+models/gemma-4-e4b/*
+!models/gemma-4-e4b/engine.json
+!models/gemma-4-e4b/NOTICE.txt
+

@@ -1,0 +1,59 @@
+{
+  "name": "Representative Urdu conversations",
+  "description": "Invented utterances for side-by-side comparison. The reference English was written for these lines. It is not a measured score.",
+  "fields": {
+    "source_ur": "Original Urdu",
+    "reference_en": "Reference English",
+    "opus_mt": "OPUS-MT output",
+    "indictrans2": "IndicTrans2 output",
+    "gemma": "Gemma output",
+    "notes": "Human evaluation notes"
+  },
+  "items": [
+    {
+      "id": "greeting-exchange",
+      "source_ur": "احمد: السلام علیکم، آپ کیسے ہیں؟\nبلال: وعلیکم السلام، میں ٹھیک ہوں۔\n\nROC/ Area:\nNorth market",
+      "reference_en": "Ahmad: Peace be upon you, how are you?\nBilal: And peace be upon you, I am fine.\n\nROC/ Area:\nNorth market",
+      "opus_mt": "",
+      "indictrans2": "",
+      "gemma": "",
+      "notes": "Check the greeting, the reply, the blank line, and the English lines."
+    },
+    {
+      "id": "market-plan",
+      "source_ur": "احمد: کیا کل آپ بازار جائیں گے؟\nبلال: ہاں، صبح نو بجے نکلنا ہے۔\nاحمد: ٹھیک ہے، میں N/H ساتھ لاؤں گا۔",
+      "reference_en": "Ahmad: Will you go to the market tomorrow?\nBilal: Yes, we leave at nine in the morning.\nAhmad: All right, I will bring N/H with me.",
+      "opus_mt": "",
+      "indictrans2": "",
+      "gemma": "",
+      "notes": "N/H should remain. صبح is morning, not evening."
+    },
+    {
+      "id": "place-name",
+      "source_ur": "وہ کل کراچی سے لاہور جائے گا۔",
+      "reference_en": "He will go from Karachi to Lahore tomorrow.",
+      "opus_mt": "",
+      "indictrans2": "",
+      "gemma": "",
+      "notes": "Proper nouns: Karachi and Lahore."
+    },
+    {
+      "id": "short-reply",
+      "source_ur": "کیا کام ہو گیا؟\nہاں۔",
+      "reference_en": "Is the work finished?\nYes.",
+      "opus_mt": "",
+      "indictrans2": "",
+      "gemma": "",
+      "notes": "The second line is only a short reply."
+    },
+    {
+      "id": "longer-handover",
+      "source_ur": "احمد: رات کی ڈیوٹی کا حال بتاؤ۔\nبلال: سب ٹھیک ہے۔ N/H ابھی تک نہیں آیا۔\nاحمد: کراچی سے کوئی پیغام آیا؟\nبلال: نہیں، میں صبح دوبارہ چیک کروں گا۔\nاحمد: ٹھیک ہے، ROC/ Area پر نظر رکھنا۔",
+      "reference_en": "Ahmad: Tell me how the night duty went.\nBilal: Everything is fine. N/H has not arrived yet.\nAhmad: Did any message come from Karachi?\nBilal: No, I will check again in the morning.\nAhmad: All right, keep an eye on ROC/ Area.",
+      "opus_mt": "",
+      "indictrans2": "",
+      "gemma": "",
+      "notes": "Longer exchange: a short reply, N/H, Karachi, morning, and the English label ROC/ Area."
+    }
+  ]
+}

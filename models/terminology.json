@@ -1,0 +1,9 @@
+{
+  "terms": [
+    {"source": "کراچی", "target": "Karachi", "kind": "place"},
+    {"source": "لاہور", "target": "Lahore", "kind": "place"},
+    {"source": "اسلام آباد", "target": "Islamabad", "kind": "place"},
+    {"source": "پشاور", "target": "Peshawar", "kind": "place"},
+    {"source": "کوئٹہ", "target": "Quetta", "kind": "place"}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "IndicTrans2 Urdu to English",
+  "backend": "indictrans2",
+  "role": "contextual",
+  "source_language": "ur",
+  "target_language": "en",
+  "default": false,
+  "device": "auto",
+  "num_beams": 5,
+  "batch_size": 4,
+  "max_new_tokens": 256,
+  "src_lang": "urd_Arab",
+  "tgt_lang": "eng_Latn"
+}

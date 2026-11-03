@@ -1,0 +1,9 @@
+# Gemma does not use a Python HTTP library or llama-cpp-python.
+# The application starts the external llama-server binary and reads the GGUF
+# from the paths in models/gemma-4-e4b/engine.json.
+#
+# llama-cpp-python was removed from this file because the translation engine
+# no longer loads the model inside the Python process.
+# Installing this file adds no packages:
+#
+#     pip install -r requirements-gemma.txt

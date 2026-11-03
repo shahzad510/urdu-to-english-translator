@@ -1,0 +1,3 @@
+# Optional. Install only when models/indictrans2-indic-en/ contains local weights.
+# The window does not install this package.
+IndicTransToolkit>=1.0

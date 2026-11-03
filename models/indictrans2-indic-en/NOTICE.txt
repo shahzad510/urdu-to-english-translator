@@ -1,0 +1,6 @@
+IndicTrans2, AI4Bharat, is published under the MIT licence.
+Keep this notice with the weights. Commercial use is allowed.
+
+The desktop application does not download these weights.
+Until the weight files are copied into this folder, contextual English
+uses the literal OPUS-MT model with the previous Urdu line when a reply is short.

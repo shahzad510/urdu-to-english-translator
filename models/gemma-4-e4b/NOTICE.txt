@@ -1,0 +1,20 @@
+Gemma 4 E4B
+
+Checkpoint: google/gemma-4-E4B-it-qat-q4_0-gguf
+Quantisation: the official Google Q4_0 GGUF
+Licence: the Gemma 4 model card identifies this model as Apache 2.0.
+
+The weights stay on the external drive named by model_path in engine.json.
+They are not copied into this folder. Keep the official LICENSE and NOTICE
+files that came with the checkpoint beside that GGUF. Do not replace those
+files with this summary. Read the Gemma 4 licence page before commercial use:
+https://ai.google.dev/gemma/docs/gemma_4_license
+
+The Q4_0 weights are about 4.5 GB. Runtime memory and the context cache need
+additional RAM. This package starts at 8192 tokens of context, 4 CPU threads,
+and reasoning off. Measure memory use before raising the context length in
+engine.json.
+
+The application starts the local llama-server binary named by server_bin.
+It does not download these weights. If the drive or the GGUF file is missing,
+translation stops. OPUS-MT and IndicTrans2 are not used as substitutes.

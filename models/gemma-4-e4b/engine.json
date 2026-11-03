@@ -1,0 +1,17 @@
+{
+  "name": "Gemma 4 E4B",
+  "backend": "gemma",
+  "source_language": "ur",
+  "target_language": "en",
+  "default": true,
+  "role": "literal",
+  "server_bin": "/media/shzy/1c58d290-c981-4926-91d9-1032ae6d9cd7/Gemma/llama.cpp/build/bin/llama-server",
+  "model_path": "/media/shzy/1c58d290-c981-4926-91d9-1032ae6d9cd7/Gemma/gemma-4-E4B_q4_0-it.gguf",
+  "host": "127.0.0.1",
+  "port": 8080,
+  "context_length": 8192,
+  "threads": 4,
+  "max_new_tokens": 2048,
+  "overlap_lines": 2,
+  "temperature": 0.2
+}
