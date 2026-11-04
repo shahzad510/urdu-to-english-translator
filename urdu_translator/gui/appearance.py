@@ -69,17 +69,22 @@ QPlainTextEdit {
     selection-color: __SELECTION_INK__;
 }
 QPushButton {
-    background: __CHROME__;
-    color: __BUTTON__;
+    background: __BUTTON_FACE__;
+    color: __INK__;
     border: 1px solid __BORDER__;
-    border-radius: 10px;
-    padding: 8px 14px;
-    min-height: 20px;
+    border-radius: 8px;
+    padding: 6px 14px;
+    min-height: 28px;
 }
 QPushButton:hover {
-    background: __ACCENT__;
-    color: __SELECTION_INK__;
-    border-color: __ACCENT__;
+    background: __BUTTON_HOVER__;
+    color: __INK__;
+    border-color: __BUTTON_HOVER_BORDER__;
+}
+QPushButton:pressed {
+    background: __BUTTON_PRESSED__;
+    color: __INK__;
+    border-color: __BUTTON_HOVER_BORDER__;
 }
 QPushButton:disabled {
     color: __MUTED__;
@@ -91,9 +96,15 @@ QPushButton#PrimaryButton {
     color: __BUTTON_TEXT__;
     border: none;
     font-weight: 600;
-    padding: 8px 18px;
+    padding: 6px 18px;
+    min-height: 28px;
 }
 QPushButton#PrimaryButton:hover {
+    background: __PRIMARY_HOVER__;
+    color: __BUTTON_TEXT__;
+    border: none;
+}
+QPushButton#PrimaryButton:pressed {
     background: __BUTTON__;
     color: __BUTTON_TEXT__;
     border: none;
@@ -101,6 +112,48 @@ QPushButton#PrimaryButton:hover {
 QPushButton#PrimaryButton:disabled {
     background: __BORDER__;
     color: __CHROME__;
+}
+QRadioButton {
+    color: __INK__;
+    background: transparent;
+    spacing: 8px;
+    padding: 4px 12px;
+    min-height: 28px;
+    min-width: 108px;
+}
+QRadioButton:hover {
+    background: __BUTTON_HOVER__;
+    border-radius: 8px;
+}
+QRadioButton:checked {
+    color: __RADIO_TEXT__;
+    font-weight: 600;
+    background: __RADIO_FACE__;
+    border-radius: 8px;
+}
+QRadioButton:checked:disabled {
+    color: __RADIO_TEXT__;
+    background: __RADIO_FACE__;
+}
+QRadioButton:disabled {
+    color: __MUTED__;
+}
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 2px solid #8AA0B4;
+    background: #FFFFFF;
+}
+QRadioButton::indicator:checked {
+    border: 2px solid #1A3654;
+    background: #1A3654;
+    border-radius: 8px;
+}
+QLabel#SummaryStatus {
+    font-weight: 600;
+    color: __BUTTON__;
+    background: transparent;
 }
 QPushButton#ModelPill {
     border-radius: 12px;
@@ -130,7 +183,12 @@ QPushButton#QuietButton {
     background: transparent;
 }
 QPushButton#QuietButton:hover {
-    background: rgba(111, 45, 34, 0.08);
+    background: __BUTTON_HOVER__;
+    color: #6f2d22;
+    border: none;
+}
+QPushButton#QuietButton:pressed {
+    background: __BUTTON_PRESSED__;
     color: #6f2d22;
     border: none;
 }
@@ -191,6 +249,13 @@ _MUTED = "#5C656D"
 _BORDER = "#D0D0D0"
 _BUTTON = "#34495E"
 _BUTTON_TEXT = "#FFFFFF"
+_BUTTON_FACE = "#F7F8F9"
+_BUTTON_HOVER = "#E6EEF5"
+_BUTTON_HOVER_BORDER = "#C5D0DA"
+_BUTTON_PRESSED = "#D5E0EA"
+_PRIMARY_HOVER = "#3E5670"
+_RADIO_FACE = "#D6E4F0"
+_RADIO_TEXT = "#1A3654"
 _ACCENT = "#C9A45C"
 _SELECTION_INK = "#202020"
 
@@ -204,12 +269,19 @@ def stylesheet() -> str:
         "__BORDER__": _BORDER,
         "__BUTTON__": _BUTTON,
         "__BUTTON_TEXT__": _BUTTON_TEXT,
+        "__BUTTON_FACE__": _BUTTON_FACE,
+        "__BUTTON_HOVER__": _BUTTON_HOVER,
+        "__BUTTON_HOVER_BORDER__": _BUTTON_HOVER_BORDER,
+        "__BUTTON_PRESSED__": _BUTTON_PRESSED,
+        "__PRIMARY_HOVER__": _PRIMARY_HOVER,
+        "__RADIO_FACE__": _RADIO_FACE,
+        "__RADIO_TEXT__": _RADIO_TEXT,
         "__ACCENT__": _ACCENT,
         "__SELECTION_INK__": _SELECTION_INK,
     }
     text = _TEMPLATE
-    for token, value in replacements.items():
-        text = text.replace(token, value)
+    for token in sorted(replacements, key=len, reverse=True):
+        text = text.replace(token, replacements[token])
     return text
 
 

@@ -63,8 +63,8 @@ def write_translation_docx(
     try:
         document = Document()
         _prepare_document(document)
-        _add_section(document, "Original Urdu text", urdu, first=True)
-        _add_section(document, "English translation", english, first=False)
+        _add_section(document, "Urdu Text", urdu, first=True)
+        _add_section(document, "English Translation", english, first=False)
         _add_section(
             document,
             "Gist / Contextual Summary",

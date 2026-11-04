@@ -35,6 +35,14 @@ def test_stylesheet_keeps_the_window_chrome_and_white_panels():
     assert "#F4F5F6" in text
     assert "#202020" in text
     assert "QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel" in text
+    hover = _rule(text, "QPushButton:hover")
+    pressed = _rule(text, "QPushButton:pressed")
+    selected = _rule(text, "QRadioButton:checked")
+    assert "#E6EEF5" in hover
+    assert "#C9A45C" not in hover
+    assert "#D5E0EA" in pressed
+    assert "#D6E4F0" in selected
+    assert "#1A3654" in selected
     assert "#FFFFFF" in _rule(text, "QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel")
     assert "__" not in text
     assert "AppearanceDialog" not in text

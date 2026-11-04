@@ -43,6 +43,7 @@ _SHARED = (
     "Cover the entire text, not only the last section. "
     "Summarise the overall communication, the main parties, the key activity, and the important context. "
     "Include an important location or instruction when the text makes it relevant. "
+    "Preserve the names, locations, dates, and important details stated in the text. "
     "Use professional, neutral English. "
     "Do not repeat the text sentence by sentence. "
     "Do not add an introductory phrase, a title, or a label. "
@@ -57,6 +58,19 @@ _SHARED = (
 )
 
 FINAL_SYSTEM = _LENGTH["brief"] + _SHARED
+
+ULTRA_SYSTEM = (
+    "You compress an existing brief summary into a much shorter one. "
+    "The text you receive is already a brief English summary, not the full translation. "
+    "Write about one third as many words. For a normal brief, aim for about 12 to 20 words. "
+    "That length is a target, not a rigid limit. "
+    "Keep the most important subject, activity, and context. "
+    "Do not introduce new information. "
+    "Do not remove essential meaning merely to meet an exact word count. "
+    "Keep the result concise and readable. "
+    "Do not add an introductory phrase, a title, or a label. "
+    "Return only the shorter summary."
+)
 
 PARTIAL_SYSTEM = (
     "You summarise one part of a longer translated conversation or document. "
@@ -91,11 +105,16 @@ def next_summary_level(level: str) -> str | None:
 
 def level_label(level: str) -> str:
     """The label shown beside the gist."""
-    return {"brief": "Brief", "detailed": "Detailed", "expanded": "Expanded"}[normalize_level(level)]
+    key = (level or "").strip().lower()
+    if key == "ultra":
+        return "Ultra-brief"
+    return {"brief": "Brief", "detailed": "Detailed", "expanded": "Expanded"}[normalize_level(key)]
 
 
 def system_prompt(level: str) -> str:
     """Instructions for one summary length. The source text is unchanged."""
+    if (level or "").strip().lower() == "ultra":
+        return ULTRA_SYSTEM
     chosen = normalize_level(level)
     return _LENGTH[chosen] + _SHARED
 
@@ -150,6 +169,10 @@ def summarize_english(
         raise TranslationFailedError(
             "There is no English text to summarise. The English translation was kept."
         )
+    if (level or "").strip().lower() == "ultra":
+        _stop_if_requested(should_stop)
+        _report(progress, "Writing the contextual summary…")
+        return _compress_to_ultra(complete, text, should_stop)
     _stop_if_requested(should_stop)
     return _reduce(
         text,
@@ -201,6 +224,22 @@ def _reduce(
         f"Part {number}:\n{part}" for number, part in enumerate(partials, start=1)
     )
     return _reduce(combined, complete, progress, should_stop, max_chars, depth + 1, level)
+
+
+def _compress_to_ultra(
+    complete: Completer,
+    brief: str,
+    should_stop: StopCallback | None,
+) -> str:
+    """One shorter version of an existing brief. The reply is not trimmed again."""
+    user = (
+        "Compress the brief summary below to about one third of its length. "
+        "Aim for about 12 to 20 words when that brief is a normal summary. "
+        "That length is a target, not a rigid limit. "
+        "Keep the subject, activity, and context. Do not add facts that are not in the brief.\n\n"
+        + brief
+    )
+    return _invoke(complete, ULTRA_SYSTEM, user, should_stop)
 
 
 def _final_summary(

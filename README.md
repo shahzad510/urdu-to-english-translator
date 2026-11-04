@@ -101,7 +101,7 @@ The report is written to `evaluation/results/comparison.md`. It does not claim a
 
 ## Editors
 
-The Urdu editor is right to left and the English editor is left to right. The gist section sits under the English panel and is read only. All three use black text (`#000000`) on a white background (`#FFFFFF`). Selected text is white on blue, and the placeholder is grey. Borders stay `#D0D0D0`, buttons `#34495E`, and the accent `#C9A45C`. Copy Gist and Save Gist as TXT apply only to the summary. Export DOCX writes the Urdu text, the English translation, and the summary under separate headings.
+The Urdu Text panel is right to left and the English Translation panel is left to right. The gist section sits under the English panel and is read only. All three use black text (`#000000`) on a white background (`#FFFFFF`). Selected text is white on blue, and the placeholder is grey. Borders stay `#D0D0D0`, buttons `#34495E`, and the accent `#C9A45C`. Copy Translation, Save Translation as TXT, and Export Translation as DOCX apply only to the English translation. Copy Gist, Save Gist as TXT, and Export Gist as DOCX apply only to the summary. Export Complete Document writes the Urdu text, the English translation, and the summary under separate headings. Brief, Detailed, and Expanded are radio options in the summary panel. Choosing one does not write a summary by itself. Regenerate Summary writes the selected level from the latest full English translation. Summarize Further compresses the current Brief into one Ultra-brief version and leaves the stored Brief, Detailed, and Expanded text in place. Return to Brief shows the Brief summary again. Editing the English translation marks the summary outdated.
 
 ## Windows
 

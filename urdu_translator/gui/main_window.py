@@ -9,7 +9,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -18,14 +17,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QSizePolicy,
     QPushButton,
+    QRadioButton,
     QSplitter,
     QStatusBar,
     QVBoxLayout,
     QWidget,
 )
 
-from urdu_translator.documents import read_document, write_translation_docx, write_txt
+from urdu_translator.documents import read_document, write_docx, write_translation_docx, write_txt
 from urdu_translator.errors import AppError
 from urdu_translator.gui.appearance import apply_editor_colors, stylesheet
 from urdu_translator.gui.editors import Editor, SourceEditor, configure_editor
@@ -35,7 +36,7 @@ from urdu_translator.history.store import HistoryRecord, HistoryStore, readable_
 from urdu_translator.paths import database_path, models_dir
 from urdu_translator.translation.backends.llama_server import stop_owned_server
 from urdu_translator.translation.loader import EngineStatus, inspect_engine
-from urdu_translator.translation.gist import level_label, next_summary_level
+from urdu_translator.translation.gist import level_label
 from urdu_translator.translation.service import TranslationResult
 from urdu_translator.workers.gist_worker import GistWorker
 from urdu_translator.workers.translate_worker import TranslateWorker
@@ -44,6 +45,11 @@ logger = logging.getLogger("urdu_translator.window")
 
 _GIST_PLACEHOLDER = "Contextual summary will appear here after translation."
 _GIST_WORKING = "Writing the contextual summary…"
+_STATUS_CURRENT = "Up to date"
+_STATUS_OUTDATED = "Translation edited — summary is outdated"
+_STATUS_GENERATING = "Generating summary..."
+_STATUS_FAILED = "Summary generation failed"
+_SUMMARY_LEVELS = (("brief", "Brief"), ("detailed", "Detailed"), ("expanded", "Expanded"))
 
 
 class MainWindow(QMainWindow):
@@ -63,16 +69,17 @@ class MainWindow(QMainWindow):
         self._centered = False
         self._gist_state = "empty"
         self._gist_running = False
-        self._gist_level = ""
+        self._gist_level = "brief"
+        self._radio_level = "brief"
         self._gist_source = ""
         self._gist_request_level = "brief"
         self._gist_request_source = ""
         self._gist_backup: tuple[str, str, str, str] | None = None
-        self._pending_retry_level = ""
+        self._summaries: dict[str, tuple[str, str]] = {}
 
         self.setWindowTitle("Urdu → English")
-        self.setMinimumSize(1100, 720)
-        self.resize(1280, 840)
+        self.setMinimumSize(1180, 920)
+        self.resize(1320, 960)
         self._build_ui()
         self._apply_theme()
         self._prepare_storage()
@@ -123,13 +130,13 @@ class MainWindow(QMainWindow):
         )
         self.gist_editor.setReadOnly(True)
         self.gist_editor.setMinimumHeight(120)
+        self.gist_editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.gist_editor.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
 
         self.open_button = QPushButton("Open")
-        self.open_button.setToolTip("Open a .txt or .docx file into the Urdu panel")
         self.open_button.setShortcut(QKeySequence.StandardKey.Open)
         self.open_button.clicked.connect(self.open_document)
 
@@ -137,7 +144,7 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(14)
         splitter.addWidget(self._build_panel(
-            "Urdu",
+            "Urdu Text",
             "Right to left",
             self.urdu_editor,
             object_name="Panel",
@@ -146,16 +153,11 @@ class MainWindow(QMainWindow):
         self.detail_splitter = QSplitter(Qt.Orientation.Vertical)
         self.detail_splitter.setChildrenCollapsible(False)
         self.detail_splitter.setHandleWidth(14)
-        self.detail_splitter.addWidget(self._build_panel(
-            "English",
-            "Left to right · editable",
-            self.english_editor,
-            object_name="EnglishPanel",
-        ))
+        self.detail_splitter.addWidget(self._build_english_panel())
         self.detail_splitter.addWidget(self._build_gist_panel())
         self.detail_splitter.setStretchFactor(0, 3)
         self.detail_splitter.setStretchFactor(1, 2)
-        self.detail_splitter.setSizes([420, 200])
+        self.detail_splitter.setSizes([460, 420])
         splitter.addWidget(self.detail_splitter)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
@@ -180,6 +182,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._build_actions())
         self.setStatusBar(QStatusBar())
         self._build_status_widgets()
+        self._mark_level_buttons()
+        self._update_action_states()
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -195,7 +199,6 @@ class MainWindow(QMainWindow):
         header.addStretch(1)
 
         self.history_button = QPushButton("History")
-        self.history_button.setToolTip("Open translations saved on this computer")
         self.history_button.clicked.connect(self.show_history)
         header.addWidget(self.history_button)
 
@@ -236,20 +239,56 @@ class MainWindow(QMainWindow):
         layout.addWidget(editor, stretch=1)
         return panel
 
-    def _build_gist_panel(self) -> QFrame:
+    def _build_english_panel(self) -> QFrame:
         panel = QFrame()
-        panel.setObjectName("GistPanel")
-        panel.setMinimumHeight(180)
+        panel.setObjectName("EnglishPanel")
+        panel.setMinimumHeight(220)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 14, 16, 12)
         layout.setSpacing(6)
 
+        title = QLabel("English Translation")
+        title.setObjectName("PanelTitle")
+        layout.addWidget(title)
+        caption = QLabel("Left to right · editable")
+        caption.setObjectName("PanelCaption")
+        layout.addWidget(caption)
+        self.english_editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.english_editor, stretch=1)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        self.copy_translation_button = QPushButton("Copy Translation")
+        self.copy_translation_button.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        self.copy_translation_button.clicked.connect(self.copy_translation)
+        self.save_translation_button = QPushButton("Save Translation as TXT")
+        self.save_translation_button.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_translation_button.clicked.connect(self.save_txt)
+        self.export_translation_button = QPushButton("Export Translation as DOCX")
+        self.export_translation_button.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self.export_translation_button.clicked.connect(self.export_translation_docx)
+        buttons.addWidget(self.copy_translation_button)
+        buttons.addWidget(self.save_translation_button)
+        buttons.addWidget(self.export_translation_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        return panel
+
+    def _build_gist_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("GistPanel")
+        panel.setMinimumHeight(400)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
         heading = QHBoxLayout()
+        heading.setSpacing(8)
         label = QLabel("Gist / Contextual Summary")
         label.setObjectName("PanelTitle")
         heading.addWidget(label)
         heading.addStretch(1)
-        self.gist_level_label = QLabel("")
+        self.gist_level_label = QLabel("Brief")
         self.gist_level_label.setObjectName("PanelTitle")
         heading.addWidget(self.gist_level_label)
         layout.addLayout(heading)
@@ -258,42 +297,44 @@ class MainWindow(QMainWindow):
         self.gist_caption.setObjectName("PanelCaption")
         layout.addWidget(self.gist_caption)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(8)
-        self.copy_gist_button = QPushButton("Copy Gist")
-        self.copy_gist_button.setToolTip("Copy the contextual summary")
-        self.copy_gist_button.clicked.connect(self.copy_gist)
-        self.save_gist_button = QPushButton("Save Gist as TXT")
-        self.save_gist_button.setToolTip("Save the contextual summary as a text file")
-        self.save_gist_button.clicked.connect(self.save_gist)
-        self.summarize_further_button = QPushButton("Summarize Further")
-        self.summarize_further_button.setToolTip(
-            "Write a longer summary from the full English translation."
-        )
-        self.summarize_further_button.clicked.connect(self.summarize_further)
-        self.gist_level_choice = QComboBox()
-        self.gist_level_choice.addItems(["Brief", "Detailed", "Expanded"])
-        self.gist_level_choice.setToolTip("Summary length")
-        self.gist_level_choice.hide()
-        self.use_level_button = QPushButton("Regenerate")
-        self.use_level_button.setToolTip(
-            "Regenerate the selected summary level from the full English translation."
-        )
-        self.use_level_button.clicked.connect(self.regenerate_selected_level)
-        self.use_level_button.hide()
-        self.gist_retry_button = QPushButton("Retry")
-        self.gist_retry_button.setToolTip("Write the contextual summary again")
-        self.gist_retry_button.clicked.connect(self.retry_gist)
-        self.gist_retry_button.hide()
-        buttons.addWidget(self.copy_gist_button)
-        buttons.addWidget(self.save_gist_button)
-        buttons.addWidget(self.summarize_further_button)
-        buttons.addWidget(self.gist_level_choice)
-        buttons.addWidget(self.use_level_button)
-        buttons.addWidget(self.gist_retry_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+        levels = QHBoxLayout()
+        levels.setSpacing(8)
+        self.level_buttons: dict[str, QRadioButton] = {}
+        for level, name in _SUMMARY_LEVELS:
+            button = QRadioButton(name, panel)
+            button.setAutoExclusive(True)
+            button.clicked.connect(lambda _checked=False, chosen=level: self.select_summary_level(chosen))
+            self.level_buttons[level] = button
+            levels.addWidget(button)
+        levels.addStretch(1)
+        layout.addLayout(levels)
 
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.regenerate_summary_button = QPushButton("Regenerate Summary")
+        self.regenerate_summary_button.clicked.connect(self.regenerate_summary)
+        self.summarize_further_button = QPushButton("Summarize Further")
+        self.summarize_further_button.clicked.connect(self.summarize_further)
+        self.return_to_brief_button = QPushButton("Return to Brief")
+        self.return_to_brief_button.clicked.connect(self.return_to_brief)
+        actions.addWidget(self.regenerate_summary_button)
+        actions.addWidget(self.summarize_further_button)
+        actions.addWidget(self.return_to_brief_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+
+        status = QHBoxLayout()
+        status.setSpacing(8)
+        status_title = QLabel("Summary Status")
+        status_title.setObjectName("PanelCaption")
+        self.summary_status = QLabel("")
+        self.summary_status.setObjectName("SummaryStatus")
+        self.summary_status.setWordWrap(True)
+        status.addWidget(status_title)
+        status.addWidget(self.summary_status, stretch=1)
+        layout.addLayout(status)
+
+        self.gist_editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.gist_editor, stretch=1)
         self.gist_progress = QProgressBar()
         self.gist_progress.setRange(0, 0)
@@ -301,6 +342,20 @@ class MainWindow(QMainWindow):
         self.gist_progress.setFixedHeight(6)
         self.gist_progress.hide()
         layout.addWidget(self.gist_progress)
+
+        exports = QHBoxLayout()
+        exports.setSpacing(8)
+        self.copy_gist_button = QPushButton("Copy Gist")
+        self.copy_gist_button.clicked.connect(self.copy_gist)
+        self.save_gist_button = QPushButton("Save Gist as TXT")
+        self.save_gist_button.clicked.connect(self.save_gist)
+        self.export_gist_button = QPushButton("Export Gist as DOCX")
+        self.export_gist_button.clicked.connect(self.export_gist_docx)
+        exports.addWidget(self.copy_gist_button)
+        exports.addWidget(self.save_gist_button)
+        exports.addWidget(self.export_gist_button)
+        exports.addStretch(1)
+        layout.addLayout(exports)
         return panel
 
     def _build_actions(self) -> QHBoxLayout:
@@ -310,36 +365,18 @@ class MainWindow(QMainWindow):
         self.translate_button = QPushButton("Translate")
         self.translate_button.setObjectName("PrimaryButton")
         self.translate_button.setShortcut(QKeySequence("Ctrl+Return"))
-        self.translate_button.setToolTip("Translate the Urdu panel (Ctrl+Enter)")
         self.translate_button.clicked.connect(self.translate)
 
         self.clear_button = QPushButton("Clear")
-        self.clear_button.setToolTip("Clear all panels")
         self.clear_button.clicked.connect(self.clear_editors)
 
-        self.copy_button = QPushButton("Copy")
-        self.copy_button.setShortcut(QKeySequence("Ctrl+Shift+C"))
-        self.copy_button.setToolTip("Copy the English translation (Ctrl+Shift+C)")
-        self.copy_button.clicked.connect(self.copy_translation)
-
-        self.save_button = QPushButton("Save TXT")
-        self.save_button.setShortcut(QKeySequence.StandardKey.Save)
-        self.save_button.setToolTip("Save the English translation as a text file (Ctrl+S)")
-        self.save_button.clicked.connect(self.save_txt)
-
-        self.export_button = QPushButton("Export DOCX")
-        self.export_button.setShortcut(QKeySequence("Ctrl+Shift+E"))
-        self.export_button.setToolTip(
-            "Export the Urdu text, English translation, and contextual summary to Word (Ctrl+Shift+E)"
-        )
-        self.export_button.clicked.connect(self.export_docx)
+        self.export_complete_button = QPushButton("Export Complete Document")
+        self.export_complete_button.clicked.connect(self.export_docx)
 
         row.addWidget(self.translate_button)
         row.addWidget(self.clear_button)
         row.addStretch(1)
-        row.addWidget(self.copy_button)
-        row.addWidget(self.save_button)
-        row.addWidget(self.export_button)
+        row.addWidget(self.export_complete_button)
         return row
 
     def _build_status_widgets(self) -> None:
@@ -386,7 +423,7 @@ class MainWindow(QMainWindow):
 
     def _apply_engine_status(self, status: EngineStatus) -> None:
         self.model_pill.setText(status.short_label)
-        self.model_pill.setToolTip(status.message)
+        self.model_pill.setToolTip("")
         self.model_pill.setProperty("state", status.state)
         self._repolish(self.model_pill)
 
@@ -457,7 +494,7 @@ class MainWindow(QMainWindow):
 
     def copy_gist(self) -> None:
         """Copy the contextual summary."""
-        if self._gist_state not in {"ready", "outdated"}:
+        if not self._gist_is_exportable():
             self._show_banner("There is no contextual summary to copy.", kind="warning")
             return
         self._copy_editor(
@@ -468,7 +505,7 @@ class MainWindow(QMainWindow):
 
     def save_gist(self) -> None:
         """Save the contextual summary as a UTF-8 text file."""
-        if self._gist_state not in {"ready", "outdated"}:
+        if not self._gist_is_exportable():
             self._show_banner("There is no contextual summary to save.", kind="warning")
             return
         self._export_editor(
@@ -481,49 +518,129 @@ class MainWindow(QMainWindow):
             empty_message="There is no contextual summary to save.",
         )
 
-    def retry_gist(self) -> None:
-        """Write the contextual summary again from the current English panel."""
-        if self._gist_state == "outdated":
-            self._request_gist(self._gist_level or "brief")
+    def export_translation_docx(self) -> None:
+        """Export the English translation by itself."""
+        self._export_editor(
+            self.english_editor,
+            title="Export English translation",
+            default_name="translation.docx",
+            file_filter="Word documents (*.docx)",
+            suffix=".docx",
+            writer=write_docx,
+            empty_message="There is no English translation to save.",
+        )
+
+    def export_gist_docx(self) -> None:
+        """Export the contextual summary by itself."""
+        if not self._gist_is_exportable():
+            self._show_banner("There is no contextual summary to save.", kind="warning")
             return
-        level = self._pending_retry_level or self._gist_level or "brief"
-        self._request_gist(level)
+        self._export_editor(
+            self.gist_editor,
+            title="Export contextual summary",
+            default_name="gist.docx",
+            file_filter="Word documents (*.docx)",
+            suffix=".docx",
+            writer=write_docx,
+            empty_message="There is no contextual summary to save.",
+        )
+
+    def select_summary_level(self, level: str) -> None:
+        """Choose which standard level Regenerate Summary will write.
+
+        Changing the radio does not call the model and does not replace the
+        summary on screen.
+        """
+        if self._busy:
+            self._mark_level_buttons()
+            return
+        self._radio_level = level if level in self.level_buttons else "brief"
+        self._mark_level_buttons()
+        self._update_action_states()
 
     def summarize_further(self) -> None:
-        """Write the next longer summary from the full English translation.
+        """Compress the current Brief into one ultra-brief summary.
 
-        Expanded is the longest level. Another click offers Brief or a
-        regenerate at Brief, Detailed, or Expanded instead of growing further.
+        Detailed and Expanded are left untouched. A second click does nothing
+        once Ultra-brief is already on screen.
         """
-        if self._busy or self._gist_state not in {"ready", "outdated"}:
+        if self._busy or self._gist_level == "ultra":
             return
-        nxt = next_summary_level(self._gist_level or "brief")
-        if nxt is None:
-            self.gist_level_choice.setCurrentText("Brief")
-            self.gist_level_choice.show()
-            self.use_level_button.show()
-            self.statusBar().showMessage(
-                "Expanded is the longest summary. Choose a level to regenerate."
-            )
+        if self._radio_level != "brief" or self._gist_level != "brief":
+            self.statusBar().showMessage("Select Brief before summarizing further.")
             return
-        self._request_gist(nxt)
+        if self._gist_state != "ready":
+            return
+        english = self.english_editor.toPlainText()
+        if not english.strip() or english != self._gist_source:
+            return
+        cached = self._summaries.get("brief")
+        if cached is None or cached[0] != english:
+            brief = self.gist_editor.toPlainText().strip()
+            if not brief:
+                return
+            self._summaries["brief"] = (english, brief)
+            cached = self._summaries["brief"]
+        self._request_gist("ultra", payload=cached[1])
 
-    def regenerate_selected_level(self) -> None:
-        """Regenerate Brief, Detailed, or Expanded from the current English text."""
-        selected = self.gist_level_choice.currentText().strip().lower()
-        self._request_gist(selected or "brief")
+    def regenerate_summary(self) -> None:
+        """Regenerate the selected radio level from the latest English translation."""
+        if self._busy:
+            return
+        self._request_gist(self._radio_level or "brief")
 
-    def _request_gist(self, level: str) -> None:
-        """Summarise the current English text at ``level`` without changing it."""
+    def return_to_brief(self) -> None:
+        """Select Brief and show a current Brief summary, or write one."""
+        if self._busy:
+            return
+        self._radio_level = "brief"
+        self._mark_level_buttons()
+        if not self.english_editor.toPlainText().strip():
+            self._gist_level = "brief"
+            self.gist_level_label.setText(level_label("brief"))
+            return
+        self._show_or_generate("brief", force=False)
+
+    def _show_or_generate(self, level: str, *, force: bool) -> None:
+        """Display a summary of the current English text, or write a new one.
+
+        A stored summary is shown only when it was generated from the English
+        text now in the editor. An older summary is not presented as current.
+        """
+        english = self.english_editor.toPlainText()
+        cached = self._summaries.get(level)
+        if not force and cached is not None and cached[0] == english and english.strip():
+            self._gist_level = level
+            self._gist_source = english
+            self._gist_state = "ready"
+            self._set_editor_text(self.gist_editor, cached[1])
+            self._set_summary_status("current")
+            self._refresh_gist_caption()
+            self._fit_gist_to_text()
+            self._update_action_states()
+            return
+        self._request_gist(level)
+
+    def _request_gist(self, level: str, *, payload: str | None = None) -> None:
+        """Summarise without changing the Urdu text or the English translation.
+
+        ``payload`` is the text sent to the model. Standard levels send the
+        full English translation. Ultra-brief sends the stored Brief only.
+        """
         if self._busy:
             return
         english = self.english_editor.toPlainText()
         if not english.strip():
             self._show_banner("There is no English translation to summarise.", kind="warning")
             return
-        if self._gist_state in {"ready", "outdated"} and self.gist_editor.toPlainText().strip():
+        text = english if payload is None else payload
+        if not text.strip():
+            self._show_banner("There is no English translation to summarise.", kind="warning")
+            return
+        previous_level = self._gist_level or "brief"
+        if self._gist_is_exportable():
             self._gist_backup = (
-                self._gist_level,
+                previous_level,
                 self.gist_editor.toPlainText(),
                 self._gist_source,
                 self._gist_state,
@@ -532,12 +649,13 @@ class MainWindow(QMainWindow):
             self._gist_backup = None
         self._gist_request_level = level or "brief"
         self._gist_request_source = english
+        self._gist_level = self._gist_request_level
         self._hide_banner()
-        self.gist_level_choice.hide()
-        self.use_level_button.hide()
+        self._mark_level_buttons()
+        self._set_summary_status("generating")
         self._set_busy(True, label="Summarising…")
         self.statusBar().showMessage("Writing the contextual summary…")
-        worker = GistWorker(english, self.models_directory, self._gist_request_level)
+        worker = GistWorker(text, self.models_directory, self._gist_request_level)
         worker.gist_started.connect(self._on_gist_started)
         worker.ready.connect(self._on_gist_ready)
         worker.failed.connect(self._on_gist_failed)
@@ -547,6 +665,9 @@ class MainWindow(QMainWindow):
         self._thread = worker
         worker.start()
 
+    def _gist_is_exportable(self) -> bool:
+        return self._gist_state in {"ready", "outdated"} and bool(self.gist_editor.toPlainText().strip())
+
     def export_docx(self) -> None:
         """Export the Urdu text, English translation, and contextual summary."""
         english = self.english_editor.toPlainText()
@@ -555,7 +676,7 @@ class MainWindow(QMainWindow):
             return
         path, _selected = QFileDialog.getSaveFileName(
             self,
-            "Export translation",
+            "Export complete document",
             str(Path.home() / "translation.docx"),
             "Word documents (*.docx)",
         )
@@ -759,34 +880,30 @@ class MainWindow(QMainWindow):
         self.gist_editor.setPlaceholderText(_GIST_WORKING)
         if self._gist_backup is None:
             self.gist_editor.clear()
-        self.gist_caption.setText("Generating summary…")
+        self._set_summary_status("generating")
         self.gist_progress.show()
-        self.gist_retry_button.hide()
-        self.summarize_further_button.setEnabled(False)
-        self.copy_gist_button.setEnabled(False)
-        self.save_gist_button.setEnabled(False)
+        self._set_summary_controls_enabled(False)
 
     def _on_gist_ready(self, text: str) -> None:
         self._gist_running = False
         self._gist_backup = None
-        self._pending_retry_level = ""
-        self._gist_level = self._gist_request_level or "brief"
-        self._gist_source = self._gist_request_source or self.english_editor.toPlainText()
+        level = self._gist_request_level or "brief"
+        source = self._gist_request_source or self.english_editor.toPlainText()
+        if level != "ultra":
+            self._summaries[level] = (source, text)
+        self._gist_level = level
+        self._gist_source = source
         self.gist_editor.setPlaceholderText(_GIST_PLACEHOLDER)
         self._set_editor_text(self.gist_editor, text)
         self.gist_progress.hide()
-        self.gist_level_choice.hide()
-        self.use_level_button.hide()
         self._fit_gist_to_text()
-        if self.english_editor.toPlainText() != self._gist_source:
+        if self.english_editor.toPlainText() != source:
             self._gist_state = "outdated"
-            self.gist_retry_button.setText("Regenerate")
-            self.gist_retry_button.show()
+            self._set_summary_status("outdated")
             self.statusBar().showMessage("The summary does not match the edited translation.")
         else:
             self._gist_state = "ready"
-            self.gist_retry_button.setText("Retry")
-            self.gist_retry_button.hide()
+            self._set_summary_status("current")
             self.statusBar().showMessage("Contextual summary ready.")
         self._refresh_gist_caption()
         if not self._busy:
@@ -801,22 +918,15 @@ class MainWindow(QMainWindow):
                 "The contextual summary could not be written. The English translation was kept. "
                 + message
             )
-        if self._restore_gist_backup():
-            self._pending_retry_level = self._gist_request_level or "brief"
-            if self._gist_state != "outdated":
-                self.gist_retry_button.setText("Retry")
-                self.gist_caption.setText("The previous summary was kept.")
-            self.gist_retry_button.show()
+        if self._restore_gist_backup(failed=True):
             self.statusBar().showMessage(message)
         else:
-            self._pending_retry_level = self._gist_request_level or "brief"
             self._gist_state = "failed"
-            self._gist_level = ""
-            self.gist_level_label.setText("")
+            self._gist_level = self._gist_request_level or self._gist_level or "brief"
             self._set_editor_text(self.gist_editor, message)
-            self.gist_caption.setText("Summary was not written")
-            self.gist_retry_button.setText("Retry")
-            self.gist_retry_button.show()
+            self.gist_caption.setText("Read only")
+            self._set_summary_status("failed")
+            self._mark_level_buttons()
             self._fit_gist_to_text()
             self.statusBar().showMessage("The English translation was kept. The summary needs attention.")
         if not self._busy:
@@ -826,27 +936,20 @@ class MainWindow(QMainWindow):
         self._gist_running = False
         self.gist_editor.setPlaceholderText(_GIST_PLACEHOLDER)
         self.gist_progress.hide()
-        if self._restore_gist_backup():
-            self._pending_retry_level = self._gist_request_level or "brief"
-            if self._gist_state != "outdated":
-                self.gist_retry_button.setText("Retry")
-                self.gist_caption.setText("Summary was cancelled. The previous summary was kept.")
-            self.gist_retry_button.show()
+        if self._restore_gist_backup(failed=False):
             self.statusBar().showMessage(
                 "Contextual summary cancelled. The English translation was kept."
             )
         else:
-            self._pending_retry_level = self._gist_request_level or "brief"
             self._gist_state = "cancelled"
-            self._gist_level = ""
-            self.gist_level_label.setText("")
+            self._gist_level = self._gist_request_level or self._gist_level or "brief"
             self._set_editor_text(
                 self.gist_editor,
                 "The contextual summary was cancelled. The English translation was kept.",
             )
-            self.gist_caption.setText("Summary was cancelled")
-            self.gist_retry_button.setText("Retry")
-            self.gist_retry_button.show()
+            self.gist_caption.setText("Read only")
+            self._set_summary_status("")
+            self._mark_level_buttons()
             self.statusBar().showMessage(
                 "Contextual summary cancelled. The English translation was kept."
             )
@@ -886,83 +989,86 @@ class MainWindow(QMainWindow):
         if self.english_editor.toPlainText() == self._gist_source:
             if self._gist_state == "outdated":
                 self._gist_state = "ready"
-                if not self._pending_retry_level:
-                    self.gist_retry_button.hide()
-                self.gist_retry_button.setText("Retry")
+                self._set_summary_status("current")
                 self._refresh_gist_caption()
             return
         self._gist_state = "outdated"
-        self.gist_retry_button.setText("Regenerate")
-        self.gist_retry_button.show()
+        self._set_summary_status("outdated")
         self._refresh_gist_caption()
 
-    def _restore_gist_backup(self) -> bool:
+    def _restore_gist_backup(self, *, failed: bool) -> bool:
         backup = self._gist_backup
         self._gist_backup = None
         if backup is None:
             return False
         level, text, source, state = backup
-        self._gist_level = level
+        self._gist_level = level or "brief"
         self._gist_source = source
         self._gist_state = state if state in {"ready", "outdated"} else "ready"
         self._set_editor_text(self.gist_editor, text)
         if self.english_editor.toPlainText() != source:
             self._gist_state = "outdated"
-            self.gist_retry_button.setText("Regenerate")
+        if failed:
+            self._set_summary_status("failed")
+        elif self._gist_state == "outdated":
+            self._set_summary_status("outdated")
+        else:
+            self._set_summary_status("current")
         self._refresh_gist_caption()
         self._fit_gist_to_text()
         return True
 
     def _refresh_gist_caption(self) -> None:
-        if not self._gist_level or self._gist_state in {"empty", "failed", "cancelled"}:
-            self.gist_level_label.setText("")
-            if self._gist_state == "empty":
-                self.gist_caption.setText("Read only")
+        self._mark_level_buttons()
+        if self._gist_running:
             return
-        label = level_label(self._gist_level)
-        self.gist_level_label.setText(label)
-        if self._gist_state == "outdated":
-            self.gist_caption.setText(f"Outdated · {label}")
-        else:
-            self.gist_caption.setText(f"{label} · read only")
-        nxt = next_summary_level(self._gist_level)
-        if nxt is None:
-            self.summarize_further_button.setToolTip(
-                "Expanded is the longest summary. Choose Brief, Detailed, or Expanded to regenerate."
-            )
-        else:
-            self.summarize_further_button.setToolTip(
-                f"Write a {level_label(nxt).lower()} summary from the full English translation."
-            )
+        self.gist_caption.setText("Read only")
+
+    def _mark_level_buttons(self) -> None:
+        radio = self._radio_level if self._radio_level in self.level_buttons else "brief"
+        self._radio_level = radio
+        shown = self._gist_level or radio
+        self.gist_level_label.setText(level_label(shown))
+        for level, button in self.level_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(level == radio)
+            button.blockSignals(False)
+
+    def _set_summary_status(self, kind: str) -> None:
+        labels = {
+            "current": _STATUS_CURRENT,
+            "outdated": _STATUS_OUTDATED,
+            "generating": _STATUS_GENERATING,
+            "failed": _STATUS_FAILED,
+        }
+        self.summary_status.setText(labels.get(kind, ""))
 
     def _reset_gist(self) -> None:
         self._gist_state = "empty"
         self._gist_running = False
-        self._gist_level = ""
+        self._gist_level = "brief"
+        self._radio_level = "brief"
         self._gist_source = ""
         self._gist_request_level = "brief"
         self._gist_request_source = ""
         self._gist_backup = None
-        self._pending_retry_level = ""
+        self._summaries = {}
         self.gist_editor.setPlaceholderText(_GIST_PLACEHOLDER)
         self.gist_editor.clear()
-        self.gist_level_label.setText("")
         self.gist_caption.setText("Read only")
         self.gist_progress.hide()
-        self.gist_retry_button.setText("Retry")
-        self.gist_retry_button.hide()
-        self.gist_level_choice.hide()
-        self.use_level_button.hide()
+        self._set_summary_status("")
+        self._mark_level_buttons()
         self._fit_gist_to_text()
 
     def _fit_gist_to_text(self) -> None:
         """Give a longer summary more of the vertical splitter, down to a minimum."""
         text = self.gist_editor.toPlainText()
         lines = text.count("\n") + (1 if text else 0)
-        wanted = min(420, max(180, 24 * min(max(lines, 1), 14) + 88))
+        wanted = min(560, max(400, 24 * min(max(lines, 1), 14) + 280))
         sizes = self.detail_splitter.sizes()
-        total = sum(sizes) or self.detail_splitter.height() or 640
-        gist = min(wanted, max(180, total - 220))
+        total = sum(sizes) or self.detail_splitter.height() or 860
+        gist = min(wanted, max(400, total - 240))
         english = max(220, total - gist)
         self.detail_splitter.setSizes([english, gist])
 
@@ -985,20 +1091,36 @@ class MainWindow(QMainWindow):
         )
         self.translate_button.setEnabled(has_source)
         self.clear_button.setEnabled(has_any)
-        self.copy_button.setEnabled(has_translation)
-        self.save_button.setEnabled(has_translation)
-        self.export_button.setEnabled(has_translation)
+        self.copy_translation_button.setEnabled(has_translation)
+        self.save_translation_button.setEnabled(has_translation)
+        self.export_translation_button.setEnabled(has_translation)
+        self.export_complete_button.setEnabled(has_translation)
         self.copy_gist_button.setEnabled(has_gist)
         self.save_gist_button.setEnabled(has_gist)
-        self.summarize_further_button.setEnabled(has_gist and has_translation)
-        self.use_level_button.setEnabled(has_translation)
-        self.gist_retry_button.setEnabled(
+        self.export_gist_button.setEnabled(has_gist)
+        brief_is_current = (
             has_translation
-            and (
-                self._gist_state in {"failed", "cancelled", "outdated"}
-                or bool(self._pending_retry_level)
-            )
+            and self._radio_level == "brief"
+            and self._gist_level == "brief"
+            and self._gist_state == "ready"
+            and self.english_editor.toPlainText() == self._gist_source
+            and bool(self.gist_editor.toPlainText().strip())
         )
+        self.summarize_further_button.setEnabled(brief_is_current)
+        self.regenerate_summary_button.setEnabled(has_translation)
+        self.return_to_brief_button.setEnabled(has_translation)
+        for button in self.level_buttons.values():
+            button.setEnabled(True)
+
+    def _set_summary_controls_enabled(self, enabled: bool) -> None:
+        self.copy_gist_button.setEnabled(enabled)
+        self.save_gist_button.setEnabled(enabled)
+        self.export_gist_button.setEnabled(enabled)
+        self.summarize_further_button.setEnabled(enabled)
+        self.regenerate_summary_button.setEnabled(enabled)
+        self.return_to_brief_button.setEnabled(enabled)
+        for button in self.level_buttons.values():
+            button.setEnabled(enabled)
 
     def _set_busy(self, busy: bool, *, label: str = "Translating…") -> None:
         self._busy = busy
@@ -1009,11 +1131,7 @@ class MainWindow(QMainWindow):
         self.history_button.setEnabled(not busy)
         if busy:
             self.progress.show()
-            self.copy_gist_button.setEnabled(False)
-            self.save_gist_button.setEnabled(False)
-            self.summarize_further_button.setEnabled(False)
-            self.use_level_button.setEnabled(False)
-            self.gist_retry_button.setEnabled(False)
+            self._set_summary_controls_enabled(False)
         else:
             self.progress.hide()
             self._update_action_states()

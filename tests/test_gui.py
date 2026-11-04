@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from urdu_translator.gui.main_window import MainWindow  # noqa: E402
 from urdu_translator.translation.engine import TranslationEngine  # noqa: E402
@@ -44,11 +44,27 @@ def test_panels_use_the_expected_directions(qapp, tmp_path: Path):
         assert window.english_editor.layoutDirection() == Qt.LayoutDirection.LeftToRight
         assert window.translate_button.text() == "Translate"
         assert window.clear_button.text() == "Clear"
-        assert window.copy_button.text() == "Copy"
-        assert window.save_button.text() == "Save TXT"
-        assert window.export_button.text() == "Export DOCX"
+        assert window.copy_translation_button.text() == "Copy Translation"
+        assert window.save_translation_button.text() == "Save Translation as TXT"
+        assert window.export_translation_button.text() == "Export Translation as DOCX"
+        assert window.export_complete_button.text() == "Export Complete Document"
+        assert window.copy_gist_button.text() == "Copy Gist"
+        assert window.save_gist_button.text() == "Save Gist as TXT"
+        assert window.export_gist_button.text() == "Export Gist as DOCX"
         assert window.model_pill.text() == "No model loaded"
         assert not hasattr(window, "contextual_editor")
+        assert not hasattr(window, "copy_button")
+        assert not hasattr(window, "save_button")
+        assert not hasattr(window, "export_button")
+        titles = [label.text() for label in window.findChildren(QLabel)]
+        buttons = [button.text() for button in window.findChildren(QPushButton)]
+        assert "Urdu Text" in titles
+        assert "English Translation" in titles
+        assert "Gist / Contextual Summary" in titles
+        assert "Summary Status" in titles
+        assert "Copy" not in buttons
+        assert "Save TXT" not in buttons
+        assert "Export DOCX" not in buttons
     finally:
         window.close()
 
