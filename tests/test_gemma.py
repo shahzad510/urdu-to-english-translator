@@ -122,7 +122,7 @@ def test_chunks_keep_speakers_english_lines_and_overlap():
     source = "احمد: سلام\nبلال: جی\n\nROC/ Area:\nNorth market"
     engine = ChunkEngine([["Hello"], ["Yes"]])
     result = translate_document(source, lambda: engine)
-    assert result.text == "احمد: Hello\nبلال: Yes\n\nROC/ Area:\nNorth market"
+    assert result.text == "Ahmed: Hello\nBilal: Yes\n\nROC/ Area:\nNorth market"
     assert engine.calls[0] == (["احمد: سلام"], [])
     assert engine.calls[1][0] == ["بلال: جی"]
     assert engine.calls[1][1] == ["احمد: سلام"]
@@ -133,7 +133,7 @@ def test_an_english_line_inside_a_group_is_restored():
     source = "احمد: سلام\nN/H"
     engine = ChunkEngine([["Hi", "changed"]], max_chunk_chars=80)
     result = translate_document(source, lambda: engine)
-    assert result.text == "احمد: Hi\nN/H"
+    assert result.text == "Ahmed: Hi\nN/H"
 
 
 def test_a_line_count_mismatch_is_an_error():
@@ -185,6 +185,9 @@ def test_prompt_includes_context_glossary_and_the_8k_default(tmp_path: Path):
     assert "احمد: پہلے" in seen["user"]
     assert "Do not include them" in seen["user"]
     assert "speaker label" in seen["system"].lower()
+    assert "latin script" in seen["system"].lower()
+    assert "unknown" in seen["system"].lower()
+    assert "ahmed" in seen["system"].lower()
     assert "exactly 1 lines" in seen["user"]
 
 

@@ -55,7 +55,7 @@ def test_conversation_keeps_labels_breaks_and_english_lines():
     assert "ROC/ Area:" in result.text
     assert "North market" in result.text
     assert "\n\n" in result.text
-    assert result.text.splitlines()[0].startswith("احمد: ")
+    assert result.text.splitlines()[0].startswith("Ahmed: ")
     assert "[السلام علیکم، آپ کیسے ہیں؟]" in result.text
     assert "N/H" in result.text
     joined = " ".join(part for batch in engine.batches for part in batch)

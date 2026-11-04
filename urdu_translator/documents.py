@@ -13,6 +13,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from urdu_translator.errors import DocumentError
+from urdu_translator.translation.segments import contains_urdu
 
 _TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16", "cp1256")
 
@@ -43,6 +44,42 @@ def write_txt(path: Path, text: str) -> None:
         destination.write_text(text, encoding="utf-8")
     except OSError as exc:
         raise DocumentError(f"Could not save {destination.name}. {exc}") from exc
+
+
+def write_translation_docx(
+    path: Path,
+    *,
+    urdu: str,
+    english: str,
+    gist: str,
+    gist_level: str = "",
+) -> None:
+    """Save the Urdu source, the English translation, and the contextual summary.
+
+    Each section has a heading. Blank lines stay blank paragraphs. Urdu lines
+    are right to left; English and the summary stay left to right.
+    """
+    destination = Path(path)
+    try:
+        document = Document()
+        _prepare_document(document)
+        _add_section(document, "Original Urdu text", urdu, first=True)
+        _add_section(document, "English translation", english, first=False)
+        _add_section(
+            document,
+            "Gist / Contextual Summary",
+            gist,
+            first=False,
+            level=gist_level,
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        document.save(str(destination))
+    except DocumentError:
+        raise
+    except OSError as exc:
+        raise DocumentError(f"Could not save {destination.name}. {exc}") from exc
+    except Exception as exc:
+        raise DocumentError(f"Could not create the Word document. {exc}") from exc
 
 
 def write_docx(path: Path, text: str) -> None:
@@ -151,6 +188,52 @@ def _join_field(label: str, value: str) -> str:
     return f"{label}\t{value}"
 
 
+def _add_section(
+    document: Document,
+    title: str,
+    body: str,
+    *,
+    first: bool,
+    level: str = "",
+) -> None:
+    heading = document.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    heading.paragraph_format.space_before = Pt(0 if first else 16)
+    heading.paragraph_format.space_after = Pt(6)
+    run = heading.add_run(title)
+    run.bold = True
+    run.font.name = "Calibri"
+    run.font.size = Pt(16)
+    run.font.color.rgb = RGBColor(0x00, 0x00, 0x00)
+    _force_ltr(heading)
+    _apply_run_fonts(heading)
+    for heading_run in heading.runs:
+        heading_run.bold = True
+        heading_run.font.size = Pt(16)
+        heading_run.font.color.rgb = RGBColor(0x00, 0x00, 0x00)
+    if level.strip():
+        note = document.add_paragraph(f"Summary level: {level.strip()}")
+        note.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        note.paragraph_format.space_before = Pt(0)
+        note.paragraph_format.space_after = Pt(6)
+        _force_ltr(note)
+        _apply_run_fonts(note)
+    text = body if body.strip() else ""
+    lines = text.split("\n") if text else [""]
+    for line in lines:
+        paragraph = document.add_paragraph(line)
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(2)
+        right_to_left = bool(line) and contains_urdu(line)
+        if right_to_left:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            _force_rtl(paragraph)
+        else:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _force_ltr(paragraph)
+        _apply_run_fonts(paragraph)
+
+
 def _prepare_document(document: Document) -> None:
     section = document.sections[0]
     for margin in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
@@ -161,13 +244,21 @@ def _prepare_document(document: Document) -> None:
     normal.font.color.rgb = RGBColor(0x1C, 0x19, 0x15)
 
 
-def _force_ltr(paragraph) -> None:
+def _set_bidi(paragraph, value: str) -> None:
     properties = paragraph._p.get_or_add_pPr()
     bidi = properties.find(qn("w:bidi"))
     if bidi is None:
         bidi = OxmlElement("w:bidi")
         properties.append(bidi)
-    bidi.set(qn("w:val"), "0")
+    bidi.set(qn("w:val"), value)
+
+
+def _force_ltr(paragraph) -> None:
+    _set_bidi(paragraph, "0")
+
+
+def _force_rtl(paragraph) -> None:
+    _set_bidi(paragraph, "1")
 
 
 def _apply_run_fonts(paragraph) -> None:

@@ -49,8 +49,12 @@ That test stops the server child it started. It does not score the English.
 
 ## What the translation does
 
-Urdu lines that belong to the same paragraph are translated together. A long paragraph is split so the source chunk stays within the 8192-token context, and the previous lines stay in the prompt so they are not translated twice. The model is asked to return one line per source line, keep speaker labels, and leave English words, abbreviations, codes, numbers, and identifiers unchanged.
+Urdu lines that belong to the same paragraph are translated together. A long paragraph is split so the source chunk stays within the 8192-token context, and the previous lines stay in the prompt so they are not translated twice. The model is asked to return one line per source line, write speaker labels and personal names in Latin script, and leave English words, abbreviations, codes, numbers, and identifiers unchanged.
 
-If the reply does not have the same number of lines, the application reports an error and does not rebuild the document. Speaker labels from the source are put back when the model drops them. Lines with no Urdu are copied. Terms in `models/terminology.json` are listed in the prompt.
+If the reply does not have the same number of lines, the application reports an error and does not rebuild the document. Each utterance then keeps one Latin-script speaker label. An existing English label is kept. Lines with no Urdu are copied, except a Urdu speaker name in front of an English utterance, which is written in Latin script. Terms in `models/terminology.json` are listed in the prompt.
 
 No accuracy figure is claimed.
+
+## Contextual summary
+
+After the English translation has been assembled, the same llama-server connection writes one gist of that translation. The default gist is brief: at most two or three sentences, about 35 to 55 words, covering the whole text. Summarize Further asks for a detailed summary (about 70 to 100 words) and then an expanded one (about 120 to 180 words). Those lengths are targets. A further click does not grow past Expanded; it offers Brief or another regenerate at a chosen level. Each level is written from the full English translation. A long translation is reduced in parts, then those notes are combined into the one summary at the selected length. The parts are not shown as separate gists, and the English text is not changed. Editing the English text marks the gist outdated until it is regenerated from the edited text. The request keeps uncertain and reported claims in that form. It does not add a threat rating, an intention, a prediction, or a recommendation. Closing the window or cancelling stops the summary request and leaves the translation on screen. A summary error stays in the gist section.

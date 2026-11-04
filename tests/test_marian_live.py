@@ -33,8 +33,8 @@ def test_local_model_translates_a_conversation_without_dropping_structure():
     lines = result.text.splitlines()
 
     assert result.translated_segment_count == 5
-    assert lines[0].startswith("احمد: ")
-    assert lines[1].startswith("بلال: ")
+    assert lines[0].startswith("Ahmed: ")
+    assert lines[1].startswith("Bilal: ")
     assert lines[2] == ""
     assert "ROC/ Area:" in lines
     assert "North market" in lines

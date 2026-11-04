@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from urdu_translator.gui.appearance import DEFAULT_APPEARANCE, Appearance, stylesheet
+from urdu_translator.gui.appearance import stylesheet
 from urdu_translator.gui.fonts import urdu_font
 from urdu_translator.history.store import HistoryRecord, HistoryStore, readable_english
 
@@ -26,14 +26,14 @@ from urdu_translator.history.store import HistoryRecord, HistoryStore, readable_
 class HistoryDialog(QDialog):
     """Browse, restore, and delete saved translations."""
 
-    def __init__(self, store: HistoryStore, parent=None, appearance: Appearance | None = None) -> None:
+    def __init__(self, store: HistoryStore, parent=None) -> None:
         super().__init__(parent)
         self.store = store
         self.selected_record: HistoryRecord | None = None
         self.setObjectName("HistoryDialog")
         self.setWindowTitle("Translation history")
         self.resize(880, 520)
-        self.setStyleSheet(stylesheet(appearance or DEFAULT_APPEARANCE))
+        self.setStyleSheet(stylesheet())
         self._build()
         self.reload()
 

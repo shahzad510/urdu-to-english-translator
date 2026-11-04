@@ -1,4 +1,4 @@
-"""Panel colours come from the shared theme and stay readable."""
+"""Both editors use a fixed black-on-white appearance."""
 
 import os
 from pathlib import Path
@@ -8,57 +8,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 from urdu_translator.gui.appearance import (
-    DEFAULT_APPEARANCE,
-    MIN_CONTRAST,
-    PanelColors,
-    contrast_problems,
-    contrast_ratio,
-    load_appearance,
-    save_appearance,
+    EDITOR_BACKGROUND,
+    EDITOR_PLACEHOLDER,
+    EDITOR_SELECTION,
+    EDITOR_SELECTION_TEXT,
+    EDITOR_TEXT,
     stylesheet,
-    with_panel,
 )
-
-
-def test_default_colours_meet_the_contrast_bar():
-    assert contrast_ratio("#202020", "#FFFFFF") >= MIN_CONTRAST
-    assert contrast_problems(DEFAULT_APPEARANCE) == []
-    text = stylesheet(DEFAULT_APPEARANCE)
-    assert "#202020" in text
-    assert "#FFFFFF" in text
-    assert "#D0D0D0" in text
-    assert "#34495E" in text
-    assert "#C9A45C" in text
-    assert "QFrame#Panel QPlainTextEdit" in text
-    assert "QFrame#EnglishPanel QPlainTextEdit" in text
-    assert "QFrame#ContextualPanel QPlainTextEdit" in text
-
-
-def test_low_contrast_is_rejected():
-    pale = with_panel(DEFAULT_APPEARANCE, "literal", PanelColors("#F5F5F5", "#FFFFFF"))
-    problems = contrast_problems(pale)
-    assert any("Literal English" in problem for problem in problems)
-
-
-def test_colours_persist_in_a_local_settings_file(tmp_path: Path):
-    path = tmp_path / "appearance.ini"
-    custom = with_panel(DEFAULT_APPEARANCE, "contextual", PanelColors("#102A43", "#F7F1E4"))
-    save_appearance(custom, path)
-    loaded = load_appearance(path)
-    assert loaded.contextual == PanelColors("#102A43", "#F7F1E4")
-    assert loaded.urdu == DEFAULT_APPEARANCE.urdu
-    assert contrast_problems(loaded) == []
-
-
-def test_a_bad_stored_colour_falls_back_to_the_default(tmp_path: Path):
-    from PySide6.QtCore import QSettings
-
-    path = tmp_path / "appearance.ini"
-    settings = QSettings(str(path), QSettings.Format.IniFormat)
-    settings.setValue("urdu/foreground", "not-a-colour")
-    settings.sync()
-    loaded = load_appearance(path)
-    assert loaded.urdu.foreground == DEFAULT_APPEARANCE.urdu.foreground
 
 
 @pytest.fixture(scope="module")
@@ -71,58 +27,133 @@ def qapp():
     return application
 
 
-def test_dialog_preview_keeps_urdu_direction_and_blocks_an_unreadable_save(qapp):
-    pytest.importorskip("PySide6")
+def test_stylesheet_keeps_the_window_chrome_and_white_panels():
+    text = stylesheet()
+    assert "#D0D0D0" in text
+    assert "#34495E" in text
+    assert "#C9A45C" in text
+    assert "#F4F5F6" in text
+    assert "#202020" in text
+    assert "QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel" in text
+    assert "#FFFFFF" in _rule(text, "QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel")
+    assert "__" not in text
+    assert "AppearanceDialog" not in text
+    assert "ColourCard" not in text
+    assert "PreviewUrdu" not in text
+    assert "PreviewEnglish" not in text
+
+
+def test_editors_are_black_on_white(qapp, tmp_path: Path):
     from PySide6.QtCore import Qt
-
-    from urdu_translator.gui.appearance_dialog import AppearanceDialog
-
-    dialog = AppearanceDialog(DEFAULT_APPEARANCE)
-    try:
-        assert dialog._previews["urdu"].layoutDirection() == Qt.LayoutDirection.RightToLeft
-        assert dialog._previews["urdu"].document().defaultTextOption().textDirection() == Qt.LayoutDirection.LeftToRight
-        assert dialog.save_button.isEnabled()
-        dialog._appearance = with_panel(dialog.appearance(), "urdu", PanelColors("#FFFFFF", "#FFFFFF"))
-        dialog._refresh()
-        assert dialog.save_button.isEnabled() is False
-        assert "Urdu" in dialog.summary.text()
-        dialog._reset()
-        assert dialog.save_button.isEnabled()
-        assert dialog.appearance().urdu.foreground == "#202020"
-    finally:
-        dialog.close()
-
-
-def test_window_colours_persist_without_changing_urdu_direction(qapp, tmp_path: Path):
-    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QPushButton
 
     from urdu_translator.gui.main_window import MainWindow
 
-    settings = tmp_path / "appearance.ini"
-    window = MainWindow(
-        models_directory=tmp_path / "models",
-        history_database=tmp_path / "history.db",
-        settings_path=settings,
-    )
+    window = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    window.show()
+    qapp.processEvents()
     try:
-        assert window.urdu_colour_button.text() == "Colour"
-        assert window.literal_colour_button.text() == "Colour"
-        custom = with_panel(window.appearance, "urdu", PanelColors("#102A43", "#F7F1E4"))
-        window.apply_appearance(custom, persist=True)
+        labels = [button.text() for button in window.findChildren(QPushButton)]
+        assert "Colour" not in labels
+        assert not hasattr(window, "urdu_colour_button")
+        assert not hasattr(window, "english_colour_button")
+
         assert window.urdu_editor.layoutDirection() == Qt.LayoutDirection.RightToLeft
         assert window.urdu_editor.document().defaultTextOption().textDirection() == Qt.LayoutDirection.LeftToRight
-        assert "#102A43" in window.styleSheet()
-        assert "#F7F1E4" in window.styleSheet()
+        assert window.english_editor.layoutDirection() == Qt.LayoutDirection.LeftToRight
+        assert window.english_editor.document().defaultTextOption().textDirection() == Qt.LayoutDirection.LeftToRight
+
+        window.urdu_editor.setPlainText("سلام")
+        window.english_editor.setPlainText("Hello")
+        qapp.processEvents()
+
+        for editor in (window.urdu_editor, window.english_editor):
+            text, background = _editor_colors(editor)
+            assert text == EDITOR_TEXT
+            assert background == EDITOR_BACKGROUND
+            assert _rendered_background(editor) == EDITOR_BACKGROUND
+            sheet = editor.styleSheet().replace(" ", "")
+            assert f"color:{EDITOR_TEXT}" in sheet
+            assert f"background-color:{EDITOR_BACKGROUND}" in sheet
+            assert f"selection-background-color:{EDITOR_SELECTION}" in sheet
+            assert f"selection-color:{EDITOR_SELECTION_TEXT}" in sheet
+            viewport = editor.viewport()
+            assert viewport.autoFillBackground()
+            highlight = viewport.palette().color(QPalette.ColorRole.Highlight).name().upper()
+            highlighted = viewport.palette().color(QPalette.ColorRole.HighlightedText).name().upper()
+            placeholder = viewport.palette().color(QPalette.ColorRole.PlaceholderText).name().upper()
+            assert highlight == EDITOR_SELECTION
+            assert highlighted == EDITOR_SELECTION_TEXT
+            assert placeholder == EDITOR_PLACEHOLDER
+            assert _contrast(placeholder, EDITOR_BACKGROUND) >= 4.5
     finally:
         window.close()
 
-    restored = MainWindow(
-        models_directory=tmp_path / "models",
-        history_database=tmp_path / "history.db",
-        settings_path=settings,
-    )
-    try:
-        assert restored.appearance.urdu == PanelColors("#102A43", "#F7F1E4")
-        assert restored.urdu_editor.layoutDirection() == Qt.LayoutDirection.RightToLeft
-    finally:
-        restored.close()
+
+def test_colour_settings_are_gone():
+    root = Path(__file__).resolve().parents[1]
+    gui = root / "urdu_translator" / "gui"
+    assert not (gui / "appearance_dialog.py").exists()
+    sources = "\n".join(path.read_text() for path in gui.glob("*.py"))
+    for obsolete in (
+        "AppearanceDialog",
+        "load_appearance",
+        "save_appearance",
+        "QSettings",
+        "literal/foreground",
+        "contextual/background",
+        "choose_colours",
+        "ColourCard",
+    ):
+        assert obsolete not in sources
+
+
+def _editor_colors(editor) -> tuple[str, str]:
+    from PySide6.QtGui import QPalette
+
+    text = editor.viewport().palette().color(QPalette.ColorRole.Text).name().upper()
+    background = editor.viewport().palette().color(QPalette.ColorRole.Base).name().upper()
+    assert editor.palette().color(QPalette.ColorRole.Text).name().upper() == text
+    assert editor.palette().color(QPalette.ColorRole.Base).name().upper() == background
+    return text, background
+
+
+def _rendered_background(editor) -> str:
+    from PySide6.QtGui import QImage
+
+    editor.resize(240, 140)
+    image = QImage(editor.size(), QImage.Format.Format_ARGB32)
+    editor.render(image)
+    counts: dict[str, int] = {}
+    width = image.width()
+    height = image.height()
+    for y in range(4, max(height - 4, 5), 3):
+        for x in range(4, max(width - 4, 5), 3):
+            color = image.pixelColor(x, y).name().upper()
+            counts[color] = counts.get(color, 0) + 1
+    return max(counts, key=counts.get)
+
+
+def _rule(sheet: str, selector: str) -> str:
+    marker = selector + " {"
+    start = sheet.index(marker) + len(marker)
+    return sheet[start:sheet.index("}", start)]
+
+
+def _contrast(foreground: str, background: str) -> float:
+    lighter = max(_luminance(foreground), _luminance(background))
+    darker = min(_luminance(foreground), _luminance(background))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _luminance(color: str) -> float:
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+
+    def channel(value: float) -> float:
+        if value <= 0.04045:
+            return value / 12.92
+        return ((value + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (channel(value) for value in channels)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue

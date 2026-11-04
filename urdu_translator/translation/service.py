@@ -12,6 +12,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from urdu_translator.translation.gist import summarize_english
+
 from urdu_translator.errors import (
     ModelNotFoundError,
     TranslationCancelled,
@@ -19,7 +21,8 @@ from urdu_translator.errors import (
     TranslationFailedError,
     UnsupportedBackendError,
 )
-from urdu_translator.translation.chunks import plan_chunks, with_original_speaker
+from urdu_translator.translation.chunks import plan_chunks
+from urdu_translator.translation.speakers import normalize_passthrough, normalize_translated_line
 from urdu_translator.translation.engine import TranslationEngine
 from urdu_translator.translation.segments import Segment, render_document, segment_document
 
@@ -43,6 +46,16 @@ class TranslationResult:
     engine_name: str
     translated_segment_count: int
     passthrough_count: int
+
+
+@dataclass(frozen=True)
+class DocumentOutputs:
+    """The English translation and, separately, its contextual summary."""
+
+    translation: TranslationResult
+    gist: str = ""
+    gist_error: str = ""
+    gist_cancelled: bool = False
 
 
 @dataclass(frozen=True)
@@ -186,6 +199,143 @@ def translate_document(
     )
 
 
+TranslatedCallback = Callable[[TranslationResult], None]
+StartedCallback = Callable[[], None]
+
+
+def produce_document_outputs(
+    text: str,
+    load_engine: EngineLoader,
+    *,
+    progress: ProgressCallback | None = None,
+    should_stop: StopCallback | None = None,
+    on_translated: TranslatedCallback | None = None,
+    on_gist_started: StartedCallback | None = None,
+) -> DocumentOutputs:
+    """Translate the document, then summarise the finished English text.
+
+    A summary failure is reported on the result. It does not discard the
+    translation. Cancellation during translation still aborts the whole call.
+    Cancellation during the summary keeps the translation.
+    """
+    result = translate_document(
+        text,
+        load_engine,
+        progress=progress,
+        should_stop=should_stop,
+    )
+    if on_translated is not None:
+        on_translated(result)
+    if not result.text.strip():
+        return DocumentOutputs(translation=result)
+    if on_gist_started is not None:
+        on_gist_started()
+    try:
+        _stop_if_requested(should_stop)
+        gist = summarize_loaded_engine(
+            load_engine,
+            result.text,
+            progress=progress,
+            should_stop=should_stop,
+            level="brief",
+        )
+    except TranslationCancelled:
+        return DocumentOutputs(translation=result, gist_cancelled=True)
+    except TranslationError as exc:
+        return DocumentOutputs(translation=result, gist_error=_gist_failure_message(exc))
+    except Exception as exc:
+        logger.error("Unexpected summary error (%s)", type(exc).__name__)
+        return DocumentOutputs(
+            translation=result,
+            gist_error="The contextual summary could not be written. The English translation was kept.",
+        )
+    return DocumentOutputs(translation=result, gist=gist)
+
+
+def summarize_loaded_engine(
+    load_engine: EngineLoader,
+    english: str,
+    *,
+    progress: ProgressCallback | None = None,
+    should_stop: StopCallback | None = None,
+    level: str = "brief",
+) -> str:
+    """Summarise the full ``english`` text at one summary level."""
+    _stop_if_requested(should_stop)
+    try:
+        engine = load_engine()
+    except TranslationError:
+        raise
+    except Exception as exc:
+        raise TranslationFailedError(
+            "The contextual summary could not be started. The English translation was kept. "
+            f"{exc}"
+        ) from exc
+    method = getattr(engine, "summarize", None)
+    if method is None:
+        # The active Gemma engine implements summarize. A stand-in used in tests
+        # may only expose the same chat function the translator uses.
+        complete = getattr(engine, "complete", None)
+        if complete is None:
+            raise TranslationFailedError(
+                "This model cannot write a contextual summary. The English translation was kept."
+            )
+        return summarize_english(
+            english,
+            complete,
+            progress=progress,
+            should_stop=should_stop,
+            level=level,
+        )
+    try:
+        gist = _call_summarize(method, english, progress, should_stop, level)
+    except TranslationError:
+        raise
+    except Exception as exc:
+        raise TranslationFailedError(
+            "The contextual summary could not be written. The English translation was kept. "
+            f"{exc}"
+        ) from exc
+    if not isinstance(gist, str) or not gist.strip():
+        raise TranslationFailedError(
+            "The model returned an empty contextual summary. The English translation was kept."
+        )
+    return gist.strip()
+
+
+def _call_summarize(
+    method: Callable[..., str],
+    english: str,
+    progress: ProgressCallback | None,
+    should_stop: StopCallback | None,
+    level: str,
+) -> str:
+    parameters = inspect.signature(method).parameters
+    accepts_keywords = any(
+        item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values()
+    )
+    kwargs: dict[str, object] = {}
+    if accepts_keywords or "progress" in parameters:
+        kwargs["progress"] = progress
+    if accepts_keywords or "should_stop" in parameters:
+        kwargs["should_stop"] = should_stop
+    if accepts_keywords or "level" in parameters:
+        kwargs["level"] = level
+    return method(english, **kwargs)
+
+
+def _gist_failure_message(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if "English translation was kept" in message:
+        return message
+    if message:
+        return (
+            "The contextual summary could not be written. The English translation was kept. "
+            + message
+        )
+    return "The contextual summary could not be written. The English translation was kept."
+
+
 def _translate_grouped(
     segments: list[Segment],
     engine: TranslationEngine,
@@ -198,7 +348,7 @@ def _translate_grouped(
     max_chars = int(getattr(engine, "max_chunk_chars", 4000) or 4000)
     overlap = int(getattr(engine, "overlap_lines", 2) or 0)
     planned = plan_chunks(texts, flags, max_chars=max_chars, overlap_lines=overlap)
-    output = list(texts)
+    output = [normalize_passthrough(line) for line in texts]
     translated_chunks = [chunk for chunk in planned if chunk.translate]
     for number, chunk in enumerate(translated_chunks, start=1):
         _stop_if_requested(should_stop)
@@ -220,9 +370,9 @@ def _translate_grouped(
             )
         for index, source_line, translated in zip(chunk.indexes, source, produced, strict=True):
             if not flags[index]:
-                output[index] = source_line
+                output[index] = normalize_passthrough(source_line)
             else:
-                output[index] = with_original_speaker(source_line, translated)
+                output[index] = normalize_translated_line(source_line, translated)
     return "\n".join(output)
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from urdu_translator.translation.segments import speaker_prefix
+from urdu_translator.translation.speakers import normalize_translated_line
 
 
 @dataclass(frozen=True)
@@ -71,10 +71,5 @@ def plan_chunks(
 
 
 def with_original_speaker(source: str, translated: str) -> str:
-    """Keep the source speaker label when the model drops or changes it."""
-    prefix = speaker_prefix(source)
-    if prefix is None:
-        return translated
-    if translated.startswith(prefix):
-        return translated
-    return f"{prefix}{translated.lstrip()}"
+    """Attach one Latin-script speaker label to a translated line."""
+    return normalize_translated_line(source, translated)

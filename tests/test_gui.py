@@ -101,7 +101,7 @@ def test_registered_backend_translates_on_a_worker_and_saves_history(qapp, tmp_p
             qapp,
             lambda: "سلام" in window.english_editor.toPlainText() and not window._busy,
         )
-        assert window.english_editor.toPlainText() == "ROC/ Area:\nA-5/ Shahrag\n\nجمال :۔ [سلام]\n"
+        assert window.english_editor.toPlainText() == "ROC/ Area:\nA-5/ Shahrag\n\nJamal: [سلام]\n"
         assert window.history is not None
         records = window.history.list_recent()
         assert len(records) == 1

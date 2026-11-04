@@ -51,16 +51,16 @@ def test_the_supplied_conversation_keeps_its_shape_in_both_modes():
 
     for text in (result.literal.text, result.contextual.text):
         lines = text.splitlines()
-        assert lines[0].startswith("احمد: ")
-        assert lines[1].startswith("بلال: ")
+        assert lines[0].startswith("Ahmed: ")
+        assert lines[1].startswith("Bilal: ")
         assert lines[2] == ""
         assert "ROC/ Area:" in lines
         assert "North market" in lines
         assert "N/H" in text
         assert "احمد:" not in " ".join(part for batch in literal.batches for part in batch)
 
-    assert result.literal.text.splitlines()[0].startswith("احمد: L:")
-    assert result.contextual.text.splitlines()[0].startswith("احمد: C:")
+    assert result.literal.text.splitlines()[0].startswith("Ahmed: L:")
+    assert result.contextual.text.splitlines()[0].startswith("Ahmed: C:")
     assert result.contextual_note == ""
     assert contextual.seen[0][0] == ""
     assert contextual.seen[1][0] == contextual.seen[0][1]

@@ -328,6 +328,6 @@ def test_live_gemma_translates_one_synthetic_line():
     finally:
         reset_for_tests()
     assert result.engine_name == "Gemma 4 E4B"
-    assert result.text.startswith("احمد:")
+    assert result.text.startswith("Ahmed:")
     assert "think>" not in result.text.lower()
-    assert result.text.strip() != "احمد:"
+    assert "احمد" not in result.text

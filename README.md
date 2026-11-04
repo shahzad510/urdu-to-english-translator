@@ -2,10 +2,13 @@
 
 Offline desktop translator for Urdu conversation transcripts. It runs on Ubuntu with Python 3 and is laid out so a later Windows build can ship the same folder.
 
-The window has two panels:
+The window has the Urdu text, the English translation, and a contextual summary:
 
 - Urdu, right to left
 - English, the translation of the conversation
+- Gist / Contextual Summary, a read-only summary written after the English text is complete
+
+The summary uses the same local Gemma model and the llama-server process already started for translation. The default gist is a brief summary of about two or three sentences. Summarize Further can write a detailed summary and then an expanded one, always from the full English text. It does not replace the English text. Editing the English text marks the gist outdated. If the summary fails, the translation stays and the gist section offers a retry.
 
 Gemma 4 E4B is the only active translation engine. The older OPUS-MT and IndicTrans2 folders stay on disk and are not used. If the Gemma weight file is missing, translation stops. It does not switch to another model.
 
@@ -96,11 +99,9 @@ python scripts/evaluate_translations.py
 
 The report is written to `evaluation/results/comparison.md`. It does not claim an accuracy improvement.
 
-## Text colours
+## Editors
 
-The Urdu and English panels each have a Colour button. The appearance dialog still stores a third colour slot from the earlier layout. Text and background are chosen in that dialog, a readable draft is shown on the window while it is open, and a pair below 4.5:1 contrast cannot be saved. Reset to default restores white backgrounds (`#FFFFFF`) and `#202020` text. Borders stay `#D0D0D0`, buttons `#34495E`, and the accent `#C9A45C`.
-
-The choice is stored with Qt settings: the registry on Windows, and a config file on Ubuntu. Restarting the application keeps it. Urdu remains right to left.
+The Urdu editor is right to left and the English editor is left to right. The gist section sits under the English panel and is read only. All three use black text (`#000000`) on a white background (`#FFFFFF`). Selected text is white on blue, and the placeholder is grey. Borders stay `#D0D0D0`, buttons `#34495E`, and the accent `#C9A45C`. Copy Gist and Save Gist as TXT apply only to the summary. Export DOCX writes the Urdu text, the English translation, and the summary under separate headings.
 
 ## Windows
 

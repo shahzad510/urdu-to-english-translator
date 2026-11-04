@@ -53,10 +53,10 @@ def test_translation_preserves_report_structure():
             "ROC/ Area:",
             "A-5/ Shahrag",
             "",
-            "جمال :۔ [یہ پہلا جملہ ہے۔]",
-            "شیخ:۔ [یہ دوسرا جملہ ہے۔]",
-            "نامعلوم:۔ N/H",
-            "Analysis: ۔ [یہ تجزیہ ہے۔]",
+            "Jamal: [یہ پہلا جملہ ہے۔]",
+            "Sheikh: [یہ دوسرا جملہ ہے۔]",
+            "Unknown: N/H",
+            "Analysis: [یہ تجزیہ ہے۔]",
             "[یہ سادہ جملہ ہے۔]",
         ]
     )

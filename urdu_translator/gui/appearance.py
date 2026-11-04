@@ -1,25 +1,19 @@
-"""Colours for the translator window.
+"""Fixed colours for the translator window.
 
-Every colour the window paints comes from this module. Widgets do not
-choose their own colours. Preferences are stored with Qt settings, which
-uses the registry on Windows and a config file on Ubuntu.
+The Urdu and English editors are black on white. The surrounding controls
+use the same fixed chrome colours. Nothing here is stored or chosen by the user.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
-
-from PySide6.QtCore import QSettings
-
-MIN_CONTRAST = 4.5
+from PySide6.QtGui import QColor, QPalette
 
 _TEMPLATE = """
-QMainWindow, QDialog#HistoryDialog, QDialog#AppearanceDialog {
+QMainWindow, QDialog#HistoryDialog {
     background: __CHROME__;
     color: __INK__;
 }
-QWidget#Root, QDialog#HistoryDialog, QDialog#AppearanceDialog {
+QWidget#Root, QDialog#HistoryDialog {
     background: __CHROME__;
     color: __INK__;
     font-size: 13px;
@@ -41,71 +35,10 @@ QLabel#PanelTitle {
     color: __BUTTON__;
     background: transparent;
 }
-QFrame#Panel {
-    background: __URDU_BG__;
+QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel {
+    background: #FFFFFF;
     border: 1px solid __BORDER__;
     border-radius: 16px;
-}
-QFrame#Panel QPlainTextEdit {
-    color: __URDU_FG__;
-    background: __URDU_BG__;
-    border: none;
-    selection-background-color: __ACCENT__;
-    selection-color: __SELECTION_INK__;
-}
-QFrame#EnglishPanel {
-    background: __LITERAL_BG__;
-    border: 1px solid __BORDER__;
-    border-radius: 16px;
-}
-QFrame#EnglishPanel QPlainTextEdit {
-    color: __LITERAL_FG__;
-    background: __LITERAL_BG__;
-    border: none;
-    selection-background-color: __ACCENT__;
-    selection-color: __SELECTION_INK__;
-}
-QFrame#ContextualPanel {
-    background: __CONTEXT_BG__;
-    border: 1px solid __BORDER__;
-    border-radius: 16px;
-}
-QFrame#ContextualPanel QPlainTextEdit {
-    color: __CONTEXT_FG__;
-    background: __CONTEXT_BG__;
-    border: none;
-    selection-background-color: __ACCENT__;
-    selection-color: __SELECTION_INK__;
-}
-QFrame#PreviewUrdu {
-    background: __URDU_BG__;
-    border: 1px solid __BORDER__;
-    border-radius: 12px;
-}
-QFrame#PreviewUrdu QPlainTextEdit {
-    color: __URDU_FG__;
-    background: __URDU_BG__;
-    border: none;
-}
-QFrame#PreviewLiteral {
-    background: __LITERAL_BG__;
-    border: 1px solid __BORDER__;
-    border-radius: 12px;
-}
-QFrame#PreviewLiteral QPlainTextEdit {
-    color: __LITERAL_FG__;
-    background: __LITERAL_BG__;
-    border: none;
-}
-QFrame#PreviewContextual {
-    background: __CONTEXT_BG__;
-    border: 1px solid __BORDER__;
-    border-radius: 12px;
-}
-QFrame#PreviewContextual QPlainTextEdit {
-    color: __CONTEXT_FG__;
-    background: __CONTEXT_BG__;
-    border: none;
 }
 QFrame#ErrorBanner {
     background: #f8e6df;
@@ -131,7 +64,6 @@ QFrame#ErrorBanner[kind="warning"] QLabel#BannerText {
     color: #5c4318;
 }
 QPlainTextEdit {
-    background: transparent;
     border: none;
     selection-background-color: __ACCENT__;
     selection-color: __SELECTION_INK__;
@@ -202,12 +134,6 @@ QPushButton#QuietButton:hover {
     color: #6f2d22;
     border: none;
 }
-QPushButton#SwatchButton {
-    border: 1px solid __BORDER__;
-    border-radius: 8px;
-    padding: 6px 10px;
-    min-width: 88px;
-}
 QSplitter::handle {
     background: __BORDER__;
     margin: 24px 4px;
@@ -227,7 +153,7 @@ QProgressBar::chunk {
     border-radius: 3px;
 }
 QTableWidget {
-    background: __URDU_BG__;
+    background: #FFFFFF;
     alternate-background-color: __CHROME__;
     color: __INK__;
     border: 1px solid __BORDER__;
@@ -244,7 +170,7 @@ QHeaderView::section {
     padding: 8px;
     font-weight: 600;
 }
-QLabel#EmptyHistory, QLabel#ContrastNote {
+QLabel#EmptyHistory {
     color: __MUTED__;
     background: transparent;
     font-size: 14px;
@@ -252,78 +178,34 @@ QLabel#EmptyHistory, QLabel#ContrastNote {
 """
 
 
-@dataclass(frozen=True)
-class PanelColors:
-    """Foreground and background for one text panel."""
 
-    foreground: str
-    background: str
+EDITOR_TEXT = "#000000"
+EDITOR_BACKGROUND = "#FFFFFF"
+EDITOR_SELECTION = "#0000FF"
+EDITOR_SELECTION_TEXT = "#FFFFFF"
+EDITOR_PLACEHOLDER = "#595959"
 
-
-@dataclass(frozen=True)
-class Appearance:
-    """The colours the window is allowed to use."""
-
-    urdu: PanelColors
-    literal: PanelColors
-    contextual: PanelColors
-    border: str = "#D0D0D0"
-    button: str = "#34495E"
-    accent: str = "#C9A45C"
-    chrome: str = "#F4F5F6"
+_CHROME = "#F4F5F6"
+_INK = "#202020"
+_MUTED = "#5C656D"
+_BORDER = "#D0D0D0"
+_BUTTON = "#34495E"
+_BUTTON_TEXT = "#FFFFFF"
+_ACCENT = "#C9A45C"
+_SELECTION_INK = "#202020"
 
 
-DEFAULT_APPEARANCE = Appearance(
-    urdu=PanelColors("#202020", "#FFFFFF"),
-    literal=PanelColors("#202020", "#FFFFFF"),
-    contextual=PanelColors("#202020", "#FFFFFF"),
-)
-
-
-def contrast_ratio(foreground: str, background: str) -> float:
-    """WCAG contrast ratio between two ``#RRGGBB`` colours."""
-    lighter = max(_luminance(foreground), _luminance(background))
-    darker = min(_luminance(foreground), _luminance(background))
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def contrast_problems(appearance: Appearance) -> list[str]:
-    """Names of panels whose text is hard to read on their background."""
-    problems: list[str] = []
-    pairs = (
-        ("Urdu", appearance.urdu),
-        ("Literal English", appearance.literal),
-        ("Contextual English", appearance.contextual),
-    )
-    for label, panel in pairs:
-        ratio = contrast_ratio(panel.foreground, panel.background)
-        if ratio < MIN_CONTRAST:
-            problems.append(
-                f"{label} contrast is {ratio:.2f}:1. Text needs at least {MIN_CONTRAST:.1f}:1."
-            )
-    return problems
-
-
-def stylesheet(appearance: Appearance) -> str:
-    """Qt stylesheet for ``appearance``. Layout direction is not set here."""
-    button_text = ink_on(appearance.button)
-    selection_ink = ink_on(appearance.accent)
-    muted = _muted(appearance.chrome)
+def stylesheet() -> str:
+    """Qt stylesheet for the window chrome. Editor text colour is applied separately."""
     replacements = {
-        "__CHROME__": appearance.chrome,
-        "__INK__": appearance.urdu.foreground,
-        "__MUTED__": muted,
-        "__BORDER__": appearance.border,
-        "__BUTTON__": appearance.button,
-        "__BUTTON_TEXT__": button_text,
-        "__ACCENT__": appearance.accent,
-        "__SELECTION_INK__": selection_ink,
-        "__URDU_FG__": appearance.urdu.foreground,
-        "__URDU_BG__": appearance.urdu.background,
-        "__LITERAL_FG__": appearance.literal.foreground,
-        "__LITERAL_BG__": appearance.literal.background,
-        "__CONTEXT_FG__": appearance.contextual.foreground,
-        "__CONTEXT_BG__": appearance.contextual.background,
+        "__CHROME__": _CHROME,
+        "__INK__": _INK,
+        "__MUTED__": _MUTED,
+        "__BORDER__": _BORDER,
+        "__BUTTON__": _BUTTON,
+        "__BUTTON_TEXT__": _BUTTON_TEXT,
+        "__ACCENT__": _ACCENT,
+        "__SELECTION_INK__": _SELECTION_INK,
     }
     text = _TEMPLATE
     for token, value in replacements.items():
@@ -331,112 +213,37 @@ def stylesheet(appearance: Appearance) -> str:
     return text
 
 
-def swatch_style(color: str) -> str:
-    """Style for a colour-picker button. The colour is the button background."""
-    ink = ink_on(color)
-    return (
-        "QPushButton#SwatchButton {"
-        f"background: {color}; color: {ink}; border: 1px solid #D0D0D0;"
-        "border-radius: 8px; padding: 6px 10px; min-width: 88px;"
+def apply_editor_colors(editor) -> None:
+    """Paint one text editor and the viewport where its text is drawn.
+
+    Both editors use black text on white. The window stylesheet does not paint
+    the editor's text area, so the colour is set on the editor itself and on
+    the viewport palette used for typed text, placeholders, and loaded text.
+    """
+    foreground = QColor(EDITOR_TEXT)
+    background = QColor(EDITOR_BACKGROUND)
+    highlight = QColor(EDITOR_SELECTION)
+    highlighted = QColor(EDITOR_SELECTION_TEXT)
+    placeholder = QColor(EDITOR_PLACEHOLDER)
+    editor.setStyleSheet(
+        "QPlainTextEdit {"
+        f"color: {EDITOR_TEXT};"
+        f"background-color: {EDITOR_BACKGROUND};"
+        f"selection-background-color: {EDITOR_SELECTION};"
+        f"selection-color: {EDITOR_SELECTION_TEXT};"
+        "border: none;"
         "}"
     )
-
-
-def ink_on(background: str) -> str:
-    """White or near-black text, whichever is readable on ``background``."""
-    white = contrast_ratio("#FFFFFF", background)
-    dark = contrast_ratio("#202020", background)
-    return "#FFFFFF" if white >= dark else "#202020"
-
-
-def load_appearance(path: Path | None = None) -> Appearance:
-    """Read saved panel colours. Missing or invalid values stay at the defaults."""
-    settings = _settings(path)
-    return Appearance(
-        urdu=_load_panel(settings, "urdu", DEFAULT_APPEARANCE.urdu),
-        literal=_load_panel(settings, "literal", DEFAULT_APPEARANCE.literal),
-        contextual=_load_panel(settings, "contextual", DEFAULT_APPEARANCE.contextual),
-    )
-
-
-def save_appearance(appearance: Appearance, path: Path | None = None) -> None:
-    """Store the three panel colours. Chrome colours stay at the theme defaults."""
-    settings = _settings(path)
-    _save_panel(settings, "urdu", appearance.urdu)
-    _save_panel(settings, "literal", appearance.literal)
-    _save_panel(settings, "contextual", appearance.contextual)
-    settings.sync()
-
-
-def with_panel(appearance: Appearance, panel: str, colors: PanelColors) -> Appearance:
-    """Return a copy with one panel recoloured."""
-    if panel == "urdu":
-        return replace(appearance, urdu=colors)
-    if panel == "literal":
-        return replace(appearance, literal=colors)
-    if panel == "contextual":
-        return replace(appearance, contextual=colors)
-    raise ValueError(f"Unknown panel {panel}.")
-
-
-def normalize_color(value: str) -> str:
-    """Return ``#RRGGBB`` or raise ``ValueError``."""
-    text = value.strip()
-    if text.startswith("#"):
-        text = text[1:]
-    if len(text) == 3:
-        text = "".join(character * 2 for character in text)
-    if len(text) != 6 or any(character not in "0123456789abcdefABCDEF" for character in text):
-        raise ValueError(f"Colour {value!r} must be a hex value such as #202020.")
-    return f"#{text.upper()}"
-
-
-def _load_panel(settings: QSettings, name: str, default: PanelColors) -> PanelColors:
-    foreground = _stored_color(settings.value(f"{name}/foreground"), default.foreground)
-    background = _stored_color(settings.value(f"{name}/background"), default.background)
-    return PanelColors(foreground, background)
-
-
-def _save_panel(settings: QSettings, name: str, colors: PanelColors) -> None:
-    settings.setValue(f"{name}/foreground", normalize_color(colors.foreground))
-    settings.setValue(f"{name}/background", normalize_color(colors.background))
-
-
-def _stored_color(value: object, default: str) -> str:
-    if not isinstance(value, str):
-        return default
-    try:
-        return normalize_color(value)
-    except ValueError:
-        return default
-
-
-def _settings(path: Path | None) -> QSettings:
-    if path is None:
-        return QSettings("UrduTranslator", "UrduTranslator")
-    return QSettings(str(path), QSettings.Format.IniFormat)
-
-
-def _luminance(color: str) -> float:
-    red, green, blue = _rgb(color)
-    return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
-
-
-def _rgb(color: str) -> tuple[int, int, int]:
-    normalized = normalize_color(color)
-    return int(normalized[1:3], 16), int(normalized[3:5], 16), int(normalized[5:7], 16)
-
-
-def _channel(value: int) -> float:
-    channel = value / 255
-    if channel <= 0.04045:
-        return channel / 12.92
-    return ((channel + 0.055) / 1.055) ** 2.4
-
-
-def _muted(background: str) -> str:
-    """A quieter label colour that still clears the contrast bar on ``background``."""
-    for candidate in ("#5C656D", "#4A545C", "#3E474E", "#202020"):
-        if contrast_ratio(candidate, background) >= MIN_CONTRAST:
-            return candidate
-    return "#202020"
+    for widget in (editor, editor.viewport()):
+        palette = widget.palette()
+        palette.setColor(QPalette.ColorRole.Text, foreground)
+        palette.setColor(QPalette.ColorRole.WindowText, foreground)
+        palette.setColor(QPalette.ColorRole.Base, background)
+        palette.setColor(QPalette.ColorRole.Window, background)
+        palette.setColor(QPalette.ColorRole.Highlight, highlight)
+        palette.setColor(QPalette.ColorRole.HighlightedText, highlighted)
+        palette.setColor(QPalette.ColorRole.PlaceholderText, placeholder)
+        widget.setPalette(palette)
+    editor.viewport().setAutoFillBackground(True)
+    editor.viewport().update()
+    editor.update()

@@ -25,6 +25,7 @@ from urdu_translator.translation.backends.llama_server import (
     shared_server,
 )
 from urdu_translator.translation.engine import TranslationEngine
+from urdu_translator.translation.gist import summarize_english, summary_char_budget
 from urdu_translator.translation.package import ModelPackage
 from urdu_translator.translation.registry import register_backend
 from urdu_translator.translation.terminology import Terminology, terminology_from_package
@@ -43,11 +44,17 @@ Completer = Callable[..., str]
 _SYSTEM = (
     "You translate Urdu conversations into natural, professional English. "
     "Return only the translation. Do not add explanations, notes, titles, or commentary. "
-    "Keep every speaker label exactly as written. "
+    "Write every speaker label in Latin script, once. "
+    "Use Unknown for نامعلوم, Ahmed for احمد, Ali for علی, and Naseer for ناصر. "
+    "Transliterate any other Urdu personal name into Latin script. "
+    "Do not give a personal name a different meaning, and do not drop it. "
+    "Do not repeat a speaker label in both Urdu and English. "
+    "Keep an existing English speaker label unchanged. "
     "Keep existing English words, abbreviations, codes, numbers, and identifiers unchanged. "
     "Return one output line for each input line, in the same order. "
+    "Translate the spoken words. Do not leave an Urdu sentence in the answer. "
     "Do not add facts that are not in the source. "
-    "If a name, place, or technical term is ambiguous, copy it as written instead of guessing."
+    "If a place or technical term is ambiguous, copy it as written instead of guessing."
 )
 
 
@@ -93,6 +100,29 @@ class GemmaEngine(TranslationEngine):
         if not isinstance(raw, str):
             raise TranslationFailedError("The translation model did not return text.")
         return split_translation(raw, len(lines))
+
+    def summarize(
+        self,
+        english: str,
+        *,
+        progress: Callable[[str], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+        level: str = "brief",
+    ) -> str:
+        """Write one contextual summary with the translation completer.
+
+        ``level`` is brief, detailed, or expanded. The completer is the same
+        local llama-server connection used for translation, so this does not
+        start another server.
+        """
+        return summarize_english(
+            english,
+            self._complete,
+            progress=progress,
+            should_stop=should_stop,
+            max_chars=summary_char_budget(self.context_length, self.max_new_tokens),
+            level=level,
+        )
 
 
 def register() -> None:

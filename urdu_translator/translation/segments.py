@@ -68,15 +68,17 @@ def render_document(segments: list[Segment], translations: list[str]) -> str:
             f"{len(translations)} lines for {expected} Urdu lines."
         )
 
+    from urdu_translator.translation.speakers import normalize_passthrough, normalize_translated_line
+
     cursor = 0
     rendered: list[str] = []
     for segment in segments:
         if not segment.needs_translation:
-            rendered.append(segment.original)
+            rendered.append(normalize_passthrough(segment.original))
             continue
         translated = _single_line(translations[cursor])
         cursor += 1
-        rendered.append(_render_translated(segment, translated))
+        rendered.append(normalize_translated_line(segment.original, translated))
     return "\n".join(rendered)
 
 
@@ -111,6 +113,14 @@ def speaker_prefix(line: str) -> str | None:
     return f"{match.group('indent')}{match.group('label')}{match.group('separator')}"
 
 
+def split_speaker(line: str) -> tuple[str, str, str] | None:
+    """Return indent, label, and utterance when the line has a real speaker label."""
+    match = _SPEAKER.match(line)
+    if match is None or not _valid_label(match.group("label")):
+        return None
+    return match.group("indent"), match.group("label"), match.group("body")
+
+
 def _valid_label(label: str) -> bool:
     """Accept short speaker names and English field labels, not whole sentences."""
     stripped = label.strip()
@@ -124,18 +134,6 @@ def _valid_label(label: str) -> bool:
     if contains_urdu(stripped):
         return len(words) <= 3 and len(stripped) <= 24
     return len(words) <= 4
-
-
-def _render_translated(segment: Segment, translated: str) -> str:
-    if segment.label is None:
-        prefix_length = len(segment.original) - len(segment.original.lstrip(" \t"))
-        prefix = segment.original[:prefix_length]
-        return f"{prefix}{translated}"
-
-    separator = segment.separator
-    if translated and not separator.endswith((" ", "\t")):
-        separator = f"{separator} "
-    return f"{segment.indent}{segment.label}{separator}{translated}"
 
 
 def _single_line(text: str) -> str:
