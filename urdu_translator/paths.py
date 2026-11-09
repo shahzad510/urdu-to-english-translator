@@ -22,8 +22,7 @@ def install_root() -> Path:
     """Folder that holds the editable models directory.
 
     In a source checkout this is the project root. In a packaged build it is
-    the folder that contains the executable, so a model can be added beside
-    the application without rebuilding it.
+    the folder that contains the executable.
     """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -33,13 +32,16 @@ def install_root() -> Path:
 def models_dir() -> Path:
     """Local directory scanned for translation model packages.
 
-    This is the folder of engine.json packages shipped with the application.
-    The large GGUF file is not stored here. On Windows it belongs under
-    ``recommended_models_dir``.
+    Windows stores engine packages under the user's LocalAppData folder.
+    Linux retains the existing project/install models directory.
     """
     override = os.environ.get("URDU_TRANSLATOR_MODELS")
     if override:
         return Path(override).expanduser()
+
+    if _windows():
+        return recommended_models_dir()
+
     return install_root() / "models"
 
 
@@ -55,8 +57,8 @@ def _windows() -> bool:
 def user_data_dir() -> Path:
     """Per-user folder for history, logs, and configuration.
 
-    Linux keeps the existing XDG location so an Ubuntu install continues to
-    find its history database. Windows uses LocalAppData and never Program Files.
+    Linux keeps the existing XDG location. Windows uses LocalAppData and
+    never writes user data into Program Files.
     """
     override = os.environ.get("URDU_TRANSLATOR_DATA")
     if override:
@@ -67,8 +69,12 @@ def user_data_dir() -> Path:
             base = str(Path.home() / "AppData" / "Local")
         path = Path(base) / "UrduTranslator"
     else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-        path = base / "urdu-translator"
+        base = os.environ.get(
+            "XDG_DATA_HOME",
+            str(Path.home() / ".local" / "share")
+        )
+        path = Path(base) / "urdu-translator"
+
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -109,7 +115,9 @@ def temp_dir() -> Path:
 def recommended_models_dir() -> Path:
     """Preferred place to keep a local copy of the GGUF model.
 
-    On Windows this is ``%LOCALAPPDATA%\\UrduTranslator\\Models``.
+    On Windows this is:
+    %LOCALAPPDATA%\\UrduTranslator\\Models
+
     The original file on a USB drive is never the install directory.
     """
     if _windows():
@@ -122,8 +130,10 @@ def database_path() -> Path:
     override = os.environ.get("URDU_TRANSLATOR_DATABASE")
     if override:
         return Path(override).expanduser()
+
     if _windows():
         return history_dir() / "history.db"
+
     return user_data_dir() / "history.db"
 
 
@@ -145,15 +155,19 @@ def bundled_llama_server() -> Path | None:
     """A llama-server binary shipped beside the application, when one is present."""
     name = "llama-server.exe" if _windows() else "llama-server"
     roots: list[Path] = []
+
     if getattr(sys, "frozen", False):
         roots.append(Path(sys.executable).resolve().parent)
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             roots.append(Path(meipass))
+
     roots.append(install_root() / "runtime")
     roots.append(install_root())
+
     for root in roots:
         candidate = root / name
         if candidate.is_file():
             return candidate
+
     return None

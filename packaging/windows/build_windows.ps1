@@ -1,4 +1,4 @@
-# Build the offline Windows x64 application folder and, when Inno Setup is
+﻿# Build the offline Windows x64 application folder and, when Inno Setup is
 # already installed, the installer. This script does not download files.
 $ErrorActionPreference = "Stop"
 
@@ -58,9 +58,9 @@ $Exe = Join-Path $Dist "UrduTranslator\UrduTranslator.exe"
 if (-not (Test-Path $Exe)) {
     Fail "UrduTranslator.exe was not created."
 }
-$BundledServer = Join-Path $Dist "UrduTranslator\llama-server.exe"
-if (-not (Test-Path $BundledServer)) {
-    Fail "llama-server.exe was not copied into the application folder."
+$BundledServer = Get-ChildItem -Path (Join-Path $Dist "UrduTranslator") -Filter "llama-server.exe" -File -Recurse | Select-Object -First 1
+if (-not $BundledServer) {
+    Fail "llama-server.exe was not copied into the application runtime folder."
 }
 $PackagedModel = Get-ChildItem -Path $Dist -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
 if ($PackagedModel) {
