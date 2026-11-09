@@ -166,3 +166,167 @@ def test_opening_an_old_history_row_shows_both_saved_english_texts(qapp, tmp_pat
         assert "Earlier contextual translation" in english
     finally:
         window.close()
+
+
+def _inside(window, widget) -> bool:
+    if not widget.isVisible() or widget.width() < 8 or widget.height() < 8:
+        return False
+    top_left = widget.mapTo(window, widget.rect().topLeft())
+    bottom_right = widget.mapTo(window, widget.rect().bottomRight())
+    area = window.rect()
+    return (
+        top_left.x() >= 0
+        and top_left.y() >= 0
+        and bottom_right.x() <= area.width() + 1
+        and bottom_right.y() <= area.height() + 1
+    )
+
+
+def test_the_window_can_resize_minimize_and_maximize(qapp, tmp_path: Path):
+    window = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    window.show()
+    qapp.processEvents()
+    try:
+        flags = window.windowFlags()
+        assert flags & Qt.WindowType.WindowMinimizeButtonHint
+        assert flags & Qt.WindowType.WindowMaximizeButtonHint
+        assert flags & Qt.WindowType.WindowCloseButtonHint
+        assert flags & Qt.WindowType.WindowSystemMenuHint
+        assert not flags & Qt.WindowType.FramelessWindowHint
+        assert window.minimumWidth() <= 960
+        assert 560 <= window.minimumHeight() <= 780
+        assert window.maximumWidth() > 2000
+        assert window.maximumHeight() > 2000
+
+        window.showNormal()
+        window.resize(1000, window.minimumHeight())
+        window.move(40, 30)
+        qapp.processEvents()
+        assert window.width() == 1000
+        assert window.height() == window.minimumHeight()
+
+        window.resize(1400, 900)
+        qapp.processEvents()
+        assert window.width() == 1400
+        assert window.height() == 900
+
+        window.showMinimized()
+        qapp.processEvents()
+        assert window.isMinimized()
+        window.showNormal()
+        qapp.processEvents()
+        assert not window.isMinimized()
+        assert window.width() == 1400
+        assert window.height() == 900
+
+        window.resize(1000, window.minimumHeight())
+        window.move(40, 30)
+        qapp.processEvents()
+        previous = window.geometry()
+        window.showMaximized()
+        qapp.processEvents()
+        assert window.isMaximized()
+        window.showNormal()
+        qapp.processEvents()
+        assert not window.isMaximized()
+        restored = window.geometry()
+        assert abs(restored.width() - previous.width()) <= 4
+        assert abs(restored.height() - previous.height()) <= 4
+        assert abs(restored.x() - previous.x()) <= 4
+        assert abs(restored.y() - previous.y()) <= 4
+
+        window.move(-5000, -5000)
+        window._clamp_to_available_screen()
+        area = window.screen().availableGeometry()
+        assert window.x() >= area.left()
+        assert window.y() >= area.top()
+    finally:
+        window.showNormal()
+        window.close()
+
+
+def test_translate_and_clear_stay_under_the_urdu_panel(qapp, tmp_path: Path):
+    window = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    window.show()
+    qapp.processEvents()
+    try:
+        assert window.translate_button.objectName() == "PrimaryButton"
+        assert window.translate_button.text() == "Translate"
+        window._confirm = lambda _message: True
+        for width, height in ((900, 620), (1500, 980)):
+            window.resize(width, height)
+            qapp.processEvents()
+            assert _inside(window, window.translate_button)
+            assert _inside(window, window.clear_button)
+            assert _inside(window, window.copy_translation_button)
+            assert _inside(window, window.export_translation_button)
+            assert _inside(window, window.copy_gist_button)
+            assert _inside(window, window.export_gist_button)
+            assert _inside(window, window.gist_editor)
+            assert _inside(window, window.regenerate_summary_button)
+            translate_top = window.translate_button.mapTo(window, window.translate_button.rect().topLeft()).y()
+            urdu_bottom = window.urdu_editor.mapTo(window, window.urdu_editor.rect().bottomLeft()).y()
+            assert translate_top > urdu_bottom
+            english_bottom = window.english_editor.mapTo(window, window.english_editor.rect().bottomLeft()).y()
+            export_top = window.copy_translation_button.mapTo(
+                window, window.copy_translation_button.rect().topLeft()
+            ).y()
+            assert export_top > english_bottom
+
+        window.urdu_editor.setPlainText("سلام")
+        window.english_editor.setPlainText("Hello")
+        window.clear_button.click()
+        assert window.urdu_editor.toPlainText() == ""
+        assert window.english_editor.toPlainText() == ""
+        assert window.translate_button.isEnabled() is False
+        window.urdu_editor.setPlainText("سلام")
+        assert window.translate_button.isEnabled()
+        window.translate_button.click()
+        assert window.translate_button.text() == "Translating…"
+        _wait_until(qapp, lambda: not window._busy)
+    finally:
+        window.close()
+
+
+def test_window_size_and_maximized_state_are_restored(qapp, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("URDU_TRANSLATOR_DATA", str(tmp_path))
+    first = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    first.show()
+    qapp.processEvents()
+    try:
+        first.showNormal()
+        first.resize(1024, 700)
+        first.move(48, 36)
+        qapp.processEvents()
+        area = first.screen().availableGeometry()
+    finally:
+        first.close()
+
+    second = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    second.show()
+    qapp.processEvents()
+    try:
+        expected_width = max(min(1024, area.width()), second.minimumWidth())
+        expected_height = max(min(700, area.height()), second.minimumHeight())
+        assert abs(second.width() - expected_width) <= 4
+        assert abs(second.height() - expected_height) <= 4
+        assert second.x() >= area.left()
+        assert second.y() >= area.top()
+        assert second.x() + 80 <= area.right()
+        assert second.y() + 40 <= area.bottom()
+        second.showMaximized()
+        qapp.processEvents()
+        assert second.isMaximized()
+    finally:
+        second.close()
+
+    third = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    third.show()
+    qapp.processEvents()
+    try:
+        assert third.isMaximized()
+        third.showNormal()
+        qapp.processEvents()
+        assert not third.isMaximized()
+    finally:
+        third.close()

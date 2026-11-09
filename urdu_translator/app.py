@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from urdu_translator.gui.fonts import build_app_icon, interface_font, load_bundled_fonts
 from urdu_translator.gui.main_window import MainWindow
-from urdu_translator.paths import user_data_dir
+from urdu_translator.paths import log_path
 
 logger = logging.getLogger("urdu_translator")
 
@@ -25,8 +25,7 @@ def configure_logging() -> None:
         return
     logger.setLevel(logging.INFO)
     try:
-        log_path = user_data_dir() / "application.log"
-        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler = logging.FileHandler(log_path(), encoding="utf-8")
     except OSError:
         return
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
@@ -48,4 +47,5 @@ def main() -> int:
     application.setWindowIcon(build_app_icon())
     window = MainWindow()
     window.show()
+    window.offer_model_setup()
     return application.exec()

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -248,14 +249,21 @@ class LlamaServer:
     def _spawn(self) -> None:
         env = os.environ.copy()
         env["HF_HUB_OFFLINE"] = "1"
-        process = self._popen(
-            server_command(self.settings),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
+        kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "start_new_session": True,
+            "env": env,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            process = self._popen(server_command(self.settings), **kwargs)
+        except OSError as exc:
+            raise TranslationFailedError(
+                f"{missing_binary_message(self.settings.binary)} {exc}"
+            ) from exc
         self._process = process
         self._owned = True
         self._owned_pid = process.pid

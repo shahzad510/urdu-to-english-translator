@@ -119,7 +119,7 @@ QRadioButton {
     spacing: 8px;
     padding: 4px 12px;
     min-height: 28px;
-    min-width: 108px;
+    min-width: 96px;
 }
 QRadioButton:hover {
     background: __BUTTON_HOVER__;

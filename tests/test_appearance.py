@@ -43,6 +43,11 @@ def test_stylesheet_keeps_the_window_chrome_and_white_panels():
     assert "#D5E0EA" in pressed
     assert "#D6E4F0" in selected
     assert "#1A3654" in selected
+    primary = _rule(text, "QPushButton#PrimaryButton")
+    primary_hover = _rule(text, "QPushButton#PrimaryButton:hover")
+    assert "#34495E" in primary
+    assert "#FFFFFF" in primary
+    assert "#3E5670" in primary_hover
     assert "#FFFFFF" in _rule(text, "QFrame#Panel, QFrame#EnglishPanel, QFrame#GistPanel")
     assert "__" not in text
     assert "AppearanceDialog" not in text
@@ -108,7 +113,6 @@ def test_colour_settings_are_gone():
         "AppearanceDialog",
         "load_appearance",
         "save_appearance",
-        "QSettings",
         "literal/foreground",
         "contextual/background",
         "choose_colours",

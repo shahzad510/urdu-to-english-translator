@@ -16,12 +16,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from urdu_translator.errors import TranslationFailedError
+from urdu_translator.model_setup import load_saved_model_path
+from urdu_translator.paths import bundled_llama_server
 from urdu_translator.translation.backends.llama_server import (
     LOCAL_HOST,
     ServerSettings,
     check_files,
-    missing_binary_message,
-    missing_model_message,
     shared_server,
 )
 from urdu_translator.translation.engine import TranslationEngine
@@ -173,21 +173,48 @@ def readiness_issue(package: ModelPackage) -> str | None:
 
 
 def external_paths(package: ModelPackage) -> tuple[Path, Path]:
-    """Read the absolute GGUF and llama-server paths from engine.json."""
-    model = package.options.get("model_path")
-    binary = package.options.get("server_bin")
-    if not isinstance(model, str) or not model.strip():
-        raise TranslationFailedError(missing_model_message(Path(EXPECTED_NAME)))
-    if not isinstance(binary, str) or not binary.strip():
-        raise TranslationFailedError(missing_binary_message(Path("llama-server")))
-    model_path = Path(model).expanduser()
-    server_bin = Path(binary).expanduser()
-    if not model_path.is_absolute() or not server_bin.is_absolute():
-        raise TranslationFailedError(
-            "model_path and server_bin in engine.json must be absolute paths. "
-            "The application does not copy the model into the project."
-        )
-    return model_path, server_bin
+    """Resolve the GGUF file and the llama-server program for this platform.
+
+    A path saved by the model setup dialog is used first. Otherwise engine.json
+    is honoured, which is how the Ubuntu install keeps its external drive.
+    A Windows build with no server_bin uses the bundled llama-server.exe.
+    """
+    return resolve_model_path(package), resolve_server_binary(package)
+
+
+def resolve_model_path(package: ModelPackage) -> Path:
+    """Choose the GGUF file without downloading one."""
+    saved = load_saved_model_path()
+    if saved is not None:
+        return saved
+    configured = _configured_path(package, "model_path")
+    if configured is not None:
+        return configured
+    from urdu_translator.paths import recommended_models_dir
+
+    return recommended_models_dir() / EXPECTED_NAME
+
+
+def resolve_server_binary(package: ModelPackage) -> Path:
+    """Choose llama-server. An engine.json path wins, then a bundled binary."""
+    configured = _configured_path(package, "server_bin")
+    if configured is not None:
+        return configured
+    bundled = bundled_llama_server()
+    if bundled is not None:
+        return bundled
+    name = "llama-server.exe" if os.name == "nt" else "llama-server"
+    return Path(name)
+
+
+def _configured_path(package: ModelPackage, key: str) -> Path | None:
+    raw = package.options.get(key)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = package.directory / path
+    return path
 
 
 def cpu_only_layers(configured: object) -> int:

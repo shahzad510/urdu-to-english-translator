@@ -31,6 +31,14 @@ __pycache__/
 
 evaluation/results/
 
+# Windows packaging output. The GGUF model and compiled binaries stay off git.
+packaging/windows/runtime/
+packaging/windows/build/
+packaging/windows/dist/
+packaging/windows/output/
+*.exe
+*.dll
+
 # Downloaded weight files stay on disk. Package instructions stay in git.
 models/*
 !models/MODEL_PACKAGE.txt

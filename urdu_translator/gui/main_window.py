@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -30,10 +30,11 @@ from urdu_translator.documents import read_document, write_docx, write_translati
 from urdu_translator.errors import AppError
 from urdu_translator.gui.appearance import apply_editor_colors, stylesheet
 from urdu_translator.gui.editors import Editor, SourceEditor, configure_editor
+from urdu_translator.gui.flow_layout import FlowLayout
 from urdu_translator.gui.fonts import interface_font, urdu_font
 from urdu_translator.gui.history_dialog import HistoryDialog
 from urdu_translator.history.store import HistoryRecord, HistoryStore, readable_english
-from urdu_translator.paths import database_path, models_dir
+from urdu_translator.paths import database_path, models_dir, window_settings_path
 from urdu_translator.translation.backends.llama_server import stop_owned_server
 from urdu_translator.translation.loader import EngineStatus, inspect_engine
 from urdu_translator.translation.gist import level_label
@@ -52,6 +53,31 @@ _STATUS_FAILED = "Summary generation failed"
 _SUMMARY_LEVELS = (("brief", "Brief"), ("detailed", "Detailed"), ("expanded", "Expanded"))
 
 
+class _WrappingButtons(QWidget):
+    """A button row that uses a second line instead of drawing past its parent."""
+
+    def __init__(self, buttons: tuple[QPushButton, ...]) -> None:
+        super().__init__()
+        self._row = FlowLayout(self, spacing=8)
+        for button in buttons:
+            self._row.addWidget(button)
+        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._row.heightForWidth(width)
+
+    def minimumSizeHint(self) -> QSize:
+        return self._row.minimumSize()
+
+    def sizeHint(self) -> QSize:
+        return self._row.sizeHint()
+
+
 class MainWindow(QMainWindow):
     """Side-by-side editor for Urdu source text and its English translation."""
 
@@ -66,7 +92,10 @@ class MainWindow(QMainWindow):
         self.history: HistoryStore | None = None
         self._thread: TranslateWorker | GistWorker | None = None
         self._busy = False
-        self._centered = False
+        self._placed = False
+        self._pending_maximize = False
+        self._sharing_details = False
+        self._user_sized_details = False
         self._gist_state = "empty"
         self._gist_running = False
         self._gist_level = "brief"
@@ -78,8 +107,12 @@ class MainWindow(QMainWindow):
         self._summaries: dict[str, tuple[str, str]] = {}
 
         self.setWindowTitle("Urdu → English")
-        self.setMinimumSize(1180, 920)
-        self.resize(1320, 960)
+        self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowSystemMenuHint, True)
+        self.setMinimumSize(760, 640)
+        self.resize(1200, 760)
         self._build_ui()
         self._apply_theme()
         self._prepare_storage()
@@ -129,7 +162,11 @@ class MainWindow(QMainWindow):
             placeholder=_GIST_PLACEHOLDER,
         )
         self.gist_editor.setReadOnly(True)
-        self.gist_editor.setMinimumHeight(120)
+        self.gist_editor.setMinimumHeight(100)
+        self.urdu_editor.setMinimumHeight(80)
+        self.english_editor.setMinimumHeight(80)
+        for editor in (self.urdu_editor, self.english_editor, self.gist_editor):
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.gist_editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.gist_editor.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -140,24 +177,34 @@ class MainWindow(QMainWindow):
         self.open_button.setShortcut(QKeySequence.StandardKey.Open)
         self.open_button.clicked.connect(self.open_document)
 
+        self.translate_button = QPushButton("Translate")
+        self.translate_button.setObjectName("PrimaryButton")
+        self.translate_button.setShortcut(QKeySequence("Ctrl+Return"))
+        self.translate_button.clicked.connect(self.translate)
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.clicked.connect(self.clear_editors)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(14)
-        splitter.addWidget(self._build_panel(
-            "Urdu Text",
-            "Right to left",
-            self.urdu_editor,
-            object_name="Panel",
-            corner=self.open_button,
-        ))
+        source_column = self._build_source_column()
+        source_column.setMinimumWidth(280)
+        splitter.addWidget(source_column)
         self.detail_splitter = QSplitter(Qt.Orientation.Vertical)
         self.detail_splitter.setChildrenCollapsible(False)
         self.detail_splitter.setHandleWidth(14)
-        self.detail_splitter.addWidget(self._build_english_panel())
-        self.detail_splitter.addWidget(self._build_gist_panel())
-        self.detail_splitter.setStretchFactor(0, 3)
-        self.detail_splitter.setStretchFactor(1, 2)
-        self.detail_splitter.setSizes([460, 420])
+        self._english_panel = self._build_english_panel()
+        self._gist_panel = self._build_gist_panel()
+        self.detail_splitter.addWidget(self._english_panel)
+        self.detail_splitter.addWidget(self._gist_panel)
+        self.detail_splitter.setMinimumWidth(600)
+        self.detail_splitter.splitterMoved.connect(self._note_detail_splitter_move)
+        self.detail_splitter.setStretchFactor(0, 1)
+        self.detail_splitter.setStretchFactor(1, 1)
+        self.detail_splitter.setSizes([320, 320])
+        for panel in (self._english_panel, self._gist_panel):
+            panel.setMinimumHeight(panel.layout().minimumSize().height())
+            panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         splitter.addWidget(self.detail_splitter)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
@@ -179,7 +226,6 @@ class MainWindow(QMainWindow):
         self.banner.hide()
         layout.addWidget(self.banner)
 
-        layout.addLayout(self._build_actions())
         self.setStatusBar(QStatusBar())
         self._build_status_widgets()
         self._mark_level_buttons()
@@ -197,6 +243,10 @@ class MainWindow(QMainWindow):
         titles.addWidget(subtitle)
         header.addLayout(titles)
         header.addStretch(1)
+
+        self.export_complete_button = QPushButton("Export Complete Document")
+        self.export_complete_button.clicked.connect(self.export_docx)
+        header.addWidget(self.export_complete_button)
 
         self.history_button = QPushButton("History")
         self.history_button.clicked.connect(self.show_history)
@@ -239,10 +289,33 @@ class MainWindow(QMainWindow):
         layout.addWidget(editor, stretch=1)
         return panel
 
+    def _build_source_column(self) -> QWidget:
+        column = QWidget()
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_panel(
+            "Urdu Text",
+            "Right to left",
+            self.urdu_editor,
+            object_name="Panel",
+            corner=self.open_button,
+        ), stretch=1)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(self.translate_button)
+        actions.addWidget(self.clear_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        return column
+
+    def _button_row(self, *buttons: QPushButton) -> QWidget:
+        return _WrappingButtons(buttons)
+
     def _build_english_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("EnglishPanel")
-        panel.setMinimumHeight(220)
+        panel.setMinimumHeight(140)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 14, 16, 12)
         layout.setSpacing(6)
@@ -253,11 +326,8 @@ class MainWindow(QMainWindow):
         caption = QLabel("Left to right · editable")
         caption.setObjectName("PanelCaption")
         layout.addWidget(caption)
-        self.english_editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.english_editor, stretch=1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(8)
         self.copy_translation_button = QPushButton("Copy Translation")
         self.copy_translation_button.setShortcut(QKeySequence("Ctrl+Shift+C"))
         self.copy_translation_button.clicked.connect(self.copy_translation)
@@ -267,17 +337,17 @@ class MainWindow(QMainWindow):
         self.export_translation_button = QPushButton("Export Translation as DOCX")
         self.export_translation_button.setShortcut(QKeySequence("Ctrl+Shift+E"))
         self.export_translation_button.clicked.connect(self.export_translation_docx)
-        buttons.addWidget(self.copy_translation_button)
-        buttons.addWidget(self.save_translation_button)
-        buttons.addWidget(self.export_translation_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+        layout.addWidget(self._button_row(
+            self.copy_translation_button,
+            self.save_translation_button,
+            self.export_translation_button,
+        ))
         return panel
 
     def _build_gist_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("GistPanel")
-        panel.setMinimumHeight(400)
+        panel.setMinimumHeight(180)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
@@ -297,31 +367,28 @@ class MainWindow(QMainWindow):
         self.gist_caption.setObjectName("PanelCaption")
         layout.addWidget(self.gist_caption)
 
-        levels = QHBoxLayout()
-        levels.setSpacing(8)
         self.level_buttons: dict[str, QRadioButton] = {}
+        level_host = QWidget()
+        levels = FlowLayout(level_host, spacing=8)
         for level, name in _SUMMARY_LEVELS:
-            button = QRadioButton(name, panel)
+            button = QRadioButton(name)
             button.setAutoExclusive(True)
             button.clicked.connect(lambda _checked=False, chosen=level: self.select_summary_level(chosen))
             self.level_buttons[level] = button
             levels.addWidget(button)
-        levels.addStretch(1)
-        layout.addLayout(levels)
+        layout.addWidget(level_host)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
         self.regenerate_summary_button = QPushButton("Regenerate Summary")
         self.regenerate_summary_button.clicked.connect(self.regenerate_summary)
         self.summarize_further_button = QPushButton("Summarize Further")
         self.summarize_further_button.clicked.connect(self.summarize_further)
         self.return_to_brief_button = QPushButton("Return to Brief")
         self.return_to_brief_button.clicked.connect(self.return_to_brief)
-        actions.addWidget(self.regenerate_summary_button)
-        actions.addWidget(self.summarize_further_button)
-        actions.addWidget(self.return_to_brief_button)
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        layout.addWidget(self._button_row(
+            self.regenerate_summary_button,
+            self.summarize_further_button,
+            self.return_to_brief_button,
+        ))
 
         status = QHBoxLayout()
         status.setSpacing(8)
@@ -334,7 +401,6 @@ class MainWindow(QMainWindow):
         status.addWidget(self.summary_status, stretch=1)
         layout.addLayout(status)
 
-        self.gist_editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.gist_editor, stretch=1)
         self.gist_progress = QProgressBar()
         self.gist_progress.setRange(0, 0)
@@ -343,41 +409,18 @@ class MainWindow(QMainWindow):
         self.gist_progress.hide()
         layout.addWidget(self.gist_progress)
 
-        exports = QHBoxLayout()
-        exports.setSpacing(8)
         self.copy_gist_button = QPushButton("Copy Gist")
         self.copy_gist_button.clicked.connect(self.copy_gist)
         self.save_gist_button = QPushButton("Save Gist as TXT")
         self.save_gist_button.clicked.connect(self.save_gist)
         self.export_gist_button = QPushButton("Export Gist as DOCX")
         self.export_gist_button.clicked.connect(self.export_gist_docx)
-        exports.addWidget(self.copy_gist_button)
-        exports.addWidget(self.save_gist_button)
-        exports.addWidget(self.export_gist_button)
-        exports.addStretch(1)
-        layout.addLayout(exports)
+        layout.addWidget(self._button_row(
+            self.copy_gist_button,
+            self.save_gist_button,
+            self.export_gist_button,
+        ))
         return panel
-
-    def _build_actions(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(8)
-
-        self.translate_button = QPushButton("Translate")
-        self.translate_button.setObjectName("PrimaryButton")
-        self.translate_button.setShortcut(QKeySequence("Ctrl+Return"))
-        self.translate_button.clicked.connect(self.translate)
-
-        self.clear_button = QPushButton("Clear")
-        self.clear_button.clicked.connect(self.clear_editors)
-
-        self.export_complete_button = QPushButton("Export Complete Document")
-        self.export_complete_button.clicked.connect(self.export_docx)
-
-        row.addWidget(self.translate_button)
-        row.addWidget(self.clear_button)
-        row.addStretch(1)
-        row.addWidget(self.export_complete_button)
-        return row
 
     def _build_status_widgets(self) -> None:
         self.progress = QProgressBar()
@@ -435,10 +478,33 @@ class MainWindow(QMainWindow):
         apply_editor_colors(self.gist_editor)
 
     def show_model_details(self) -> None:
-        """Show the current model-folder message in the banner."""
+        """Show the model status, or the setup dialog when the model is missing."""
         status = self.refresh_model_status()
-        kind = "info" if status.state == "ready" else "warning"
-        self._show_banner(status.message, kind=kind)
+        if status.state != "ready":
+            self.offer_model_setup()
+            return
+        self._show_banner(status.message, kind="info")
+
+    def offer_model_setup(self) -> None:
+        """Open the Gemma setup dialog when the offline model is not ready.
+
+        A model that is already configured is reused. The dialog is the way to
+        point at a USB copy. Translation is not described as ready until the
+        model file can be read.
+        """
+        status = self.refresh_model_status()
+        if status.state == "ready":
+            self.statusBar().showMessage("AI Model Ready — Offline Mode")
+            return
+        from urdu_translator.gui.model_setup_dialog import ModelSetupDialog
+
+        dialog = ModelSetupDialog(self)
+        dialog.exec()
+        status = self.refresh_model_status()
+        if status.state == "ready":
+            self.statusBar().showMessage("AI Model Ready — Offline Mode")
+        else:
+            self._show_banner(status.message, kind="warning")
 
     def translate(self) -> None:
         """Start a background translation of the current Urdu text."""
@@ -727,6 +793,7 @@ class MainWindow(QMainWindow):
             self._load_history_record(dialog.selected_record)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
+        self._save_window_state()
         thread = self._thread
         if thread is not None and thread.isRunning():
             thread.requestInterruption()
@@ -735,11 +802,24 @@ class MainWindow(QMainWindow):
             stop_owned_server()
         super().closeEvent(event)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        if not self._user_sized_details:
+            self._share_detail_height()
+
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API
         super().showEvent(event)
-        if not self._centered:
-            self._centered = True
+        self._enforce_layout_minimum()
+        if self._placed:
+            return
+        self._placed = True
+        if not self._restore_window_state():
             self._center_on_screen()
+        self._clamp_to_available_screen()
+        self._share_detail_height()
+        if self._pending_maximize:
+            self._pending_maximize = False
+            self.showMaximized()
 
     def _open_path(self, path: str) -> None:
         if self._busy:
@@ -1065,11 +1145,11 @@ class MainWindow(QMainWindow):
         """Give a longer summary more of the vertical splitter, down to a minimum."""
         text = self.gist_editor.toPlainText()
         lines = text.count("\n") + (1 if text else 0)
-        wanted = min(560, max(400, 24 * min(max(lines, 1), 14) + 280))
+        wanted = min(480, max(200, 20 * min(max(lines, 1), 14) + 140))
         sizes = self.detail_splitter.sizes()
-        total = sum(sizes) or self.detail_splitter.height() or 860
-        gist = min(wanted, max(400, total - 240))
-        english = max(220, total - gist)
+        total = sum(sizes) or self.detail_splitter.height() or 640
+        gist = min(wanted, max(180, total - 160))
+        english = max(140, total - gist)
         self.detail_splitter.setSizes([english, gist])
 
     def _update_counts(self) -> None:
@@ -1163,13 +1243,98 @@ class MainWindow(QMainWindow):
         )
         return answer == QMessageBox.StandardButton.Yes
 
+    def _note_detail_splitter_move(self, _position: int, _index: int) -> None:
+        if self._sharing_details or not self._placed:
+            return
+        self._user_sized_details = True
+
+    def _share_detail_height(self) -> None:
+        """Give the English and summary editors the spare height in equal parts."""
+        if self._sharing_details:
+            return
+        total = sum(self.detail_splitter.sizes())
+        if total < 200:
+            return
+        english_min = self._english_panel.minimumHeight()
+        gist_min = self._gist_panel.minimumHeight()
+        english_chrome = max(40, english_min - self.english_editor.minimumHeight())
+        gist_chrome = max(40, gist_min - self.gist_editor.minimumHeight())
+        spare = total - english_chrome - gist_chrome
+        each = max(self.gist_editor.minimumHeight(), spare // 2)
+        gist = max(gist_min, min(total - english_min, gist_chrome + each))
+        english = max(english_min, total - gist)
+        gist = total - english
+        if self.detail_splitter.sizes() == [english, gist]:
+            return
+        self._sharing_details = True
+        try:
+            self.detail_splitter.setSizes([english, gist])
+        finally:
+            self._sharing_details = False
+
+    def _enforce_layout_minimum(self) -> None:
+        """Stop the window shrinking until buttons are pushed outside it."""
+        for panel in (self._english_panel, self._gist_panel):
+            layout = panel.layout()
+            if layout is None:
+                continue
+            needed = layout.minimumSize().height()
+            if needed > panel.minimumHeight():
+                panel.setMinimumHeight(needed)
+        hint = self.minimumSizeHint()
+        width = max(760, hint.width())
+        height = max(640, hint.height())
+        if self.minimumWidth() != width or self.minimumHeight() != height:
+            self.setMinimumSize(width, height)
+
+    def _window_settings(self) -> QSettings:
+        return QSettings(str(window_settings_path()), QSettings.Format.IniFormat)
+
+    def _restore_window_state(self) -> bool:
+        """Return True when a saved size and position could be applied."""
+        settings = self._window_settings()
+        geometry = settings.value("geometry")
+        if not isinstance(geometry, QByteArray) or geometry.isEmpty():
+            return False
+        if not self.restoreGeometry(geometry):
+            return False
+        maximized = settings.value("maximized", False)
+        self._pending_maximize = str(maximized).lower() in {"true", "1", "yes"}
+        return True
+
+    def _save_window_state(self) -> None:
+        settings = self._window_settings()
+        settings.setValue("geometry", self.saveGeometry())
+        settings.setValue("maximized", self.isMaximized())
+
     def _center_on_screen(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
             return
+        area = screen.availableGeometry()
+        width = min(self.width(), area.width())
+        height = min(self.height(), area.height())
+        self.resize(width, height)
         frame = self.frameGeometry()
-        frame.moveCenter(screen.availableGeometry().center())
+        frame.moveCenter(area.center())
         self.move(frame.topLeft())
+
+    def _clamp_to_available_screen(self) -> None:
+        """Keep the title bar on the current screen, including a restored position."""
+        if self.isMaximized() or self.isFullScreen():
+            return
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        width = min(max(self.width(), self.minimumWidth()), area.width())
+        height = min(max(self.height(), self.minimumHeight()), area.height())
+        if width != self.width() or height != self.height():
+            self.resize(width, height)
+        frame = self.frameGeometry()
+        x = min(max(frame.x(), area.left()), max(area.left(), area.right() - frame.width() + 1))
+        y = min(max(frame.y(), area.top()), max(area.top(), area.bottom() - 80))
+        self.move(x, y)
 
     @staticmethod
     def _repolish(widget: QWidget) -> None:

@@ -1,0 +1,87 @@
+# Build the offline Windows x64 application folder and, when Inno Setup is
+# already installed, the installer. This script does not download files.
+$ErrorActionPreference = "Stop"
+
+$Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+Set-Location $Root
+
+function Fail([string]$Message) {
+    Write-Error $Message
+    exit 1
+}
+
+if (-not [Environment]::Is64BitOperatingSystem) {
+    Fail "This build requires 64-bit Windows."
+}
+
+$Python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $Python) {
+    Fail "Python was not found. Install Python 3.11 or 3.12 x64 on the build machine before running this script. This script will not download it."
+}
+
+$Version = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print(sys.maxsize > 2**32)"
+$Lines = $Version -split "`n"
+if ($Lines[0] -notin @("3.11", "3.12")) {
+    Fail "Python 3.11 or 3.12 is required. Found $($Lines[0]). This script will not install another Python."
+}
+if ($Lines[1].Trim() -ne "True") {
+    Fail "Python is not 64-bit."
+}
+
+& python -c "import PySide6, docx, PyInstaller" 
+if ($LASTEXITCODE -ne 0) {
+    Fail "PySide6, python-docx, and PyInstaller must already be installed in this Python. Install them from a local copy. This script will not use pip to download them."
+}
+
+$Runtime = Join-Path $PSScriptRoot "runtime"
+$Server = Join-Path $Runtime "llama-server.exe"
+if (-not (Test-Path $Server)) {
+    Fail "Place a CPU-only Windows x64 llama-server.exe and every DLL it needs in packaging\windows\runtime. Do not use the Linux llama-server binary. This script will not download llama.cpp."
+}
+
+$Gguf = Get-ChildItem -Path $Runtime -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
+if ($Gguf) {
+    Fail "A .gguf file is in the packaging tree. Remove it. The model is transferred on USB and must not be installed with the application."
+}
+
+$Dist = Join-Path $PSScriptRoot "dist"
+$Work = Join-Path $PSScriptRoot "build"
+if (Test-Path $Dist) { Remove-Item $Dist -Recurse -Force }
+if (Test-Path $Work) { Remove-Item $Work -Recurse -Force }
+
+& python -m PyInstaller --noconfirm --distpath $Dist --workpath $Work (Join-Path $PSScriptRoot "UrduTranslator.spec")
+if ($LASTEXITCODE -ne 0) {
+    Fail "PyInstaller did not produce the application."
+}
+
+$Exe = Join-Path $Dist "UrduTranslator\UrduTranslator.exe"
+if (-not (Test-Path $Exe)) {
+    Fail "UrduTranslator.exe was not created."
+}
+$BundledServer = Join-Path $Dist "UrduTranslator\llama-server.exe"
+if (-not (Test-Path $BundledServer)) {
+    Fail "llama-server.exe was not copied into the application folder."
+}
+$PackagedModel = Get-ChildItem -Path $Dist -Filter *.gguf -Recurse -ErrorAction SilentlyContinue
+if ($PackagedModel) {
+    Fail "The build contains a GGUF file. The installer must not include the model."
+}
+
+Write-Host "Application folder: $Dist\UrduTranslator"
+Write-Host "UrduTranslator.exe and llama-server.exe are present. No GGUF file was packaged."
+
+$Iscc = Get-Command ISCC -ErrorAction SilentlyContinue
+if (-not $Iscc) {
+    Write-Host "Inno Setup compiler (ISCC) was not found. The installer was not built. Compile packaging\windows\installer.iss on this machine when Inno Setup is installed. Do not download it from the offline target."
+    exit 0
+}
+
+& ISCC (Join-Path $PSScriptRoot "installer.iss")
+if ($LASTEXITCODE -ne 0) {
+    Fail "Inno Setup did not create the installer."
+}
+$Setup = Join-Path $PSScriptRoot "output\UrduTranslator-Setup-1.0.0-x64.exe"
+if (-not (Test-Path $Setup)) {
+    Fail "The installer file was not created."
+}
+Write-Host "Installer: $Setup"

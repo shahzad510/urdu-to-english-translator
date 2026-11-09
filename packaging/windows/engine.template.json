@@ -1,0 +1,15 @@
+{
+  "name": "Gemma 4 E4B",
+  "backend": "gemma",
+  "source_language": "ur",
+  "target_language": "en",
+  "default": true,
+  "role": "literal",
+  "host": "127.0.0.1",
+  "port": 8080,
+  "context_length": 8192,
+  "threads": 4,
+  "max_new_tokens": 2048,
+  "overlap_lines": 2,
+  "temperature": 0.2
+}

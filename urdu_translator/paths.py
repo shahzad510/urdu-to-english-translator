@@ -31,7 +31,12 @@ def install_root() -> Path:
 
 
 def models_dir() -> Path:
-    """Local directory scanned for translation model packages."""
+    """Local directory scanned for translation model packages.
+
+    This is the folder of engine.json packages shipped with the application.
+    The large GGUF file is not stored here. On Windows it belongs under
+    ``recommended_models_dir``.
+    """
     override = os.environ.get("URDU_TRANSLATOR_MODELS")
     if override:
         return Path(override).expanduser()
@@ -43,14 +48,24 @@ def fonts_dir() -> Path:
     return package_dir() / "resources" / "fonts"
 
 
+def _windows() -> bool:
+    return sys.platform == "win32"
+
+
 def user_data_dir() -> Path:
-    """Per-user folder for the history database and the application log."""
+    """Per-user folder for history, logs, and configuration.
+
+    Linux keeps the existing XDG location so an Ubuntu install continues to
+    find its history database. Windows uses LocalAppData and never Program Files.
+    """
     override = os.environ.get("URDU_TRANSLATOR_DATA")
     if override:
         path = Path(override).expanduser()
-    elif sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        path = base / "UrduTranslator"
+    elif _windows():
+        base = os.environ.get("LOCALAPPDATA")
+        if not base:
+            base = str(Path.home() / "AppData" / "Local")
+        path = Path(base) / "UrduTranslator"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
         path = base / "urdu-translator"
@@ -58,9 +73,87 @@ def user_data_dir() -> Path:
     return path
 
 
+def _ensure(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def config_dir() -> Path:
+    """Configuration files. On Linux these stay in the existing data folder."""
+    if _windows():
+        return _ensure(user_data_dir() / "Configuration")
+    return user_data_dir()
+
+
+def history_dir() -> Path:
+    """Folder that holds the history database on Windows."""
+    if _windows():
+        return _ensure(user_data_dir() / "History")
+    return user_data_dir()
+
+
+def logs_dir() -> Path:
+    """Folder that holds the application log on Windows."""
+    if _windows():
+        return _ensure(user_data_dir() / "Logs")
+    return user_data_dir()
+
+
+def temp_dir() -> Path:
+    """Scratch files for this user. Not used for the GGUF model."""
+    if _windows():
+        return _ensure(user_data_dir() / "Temp")
+    return _ensure(user_data_dir() / "tmp")
+
+
+def recommended_models_dir() -> Path:
+    """Preferred place to keep a local copy of the GGUF model.
+
+    On Windows this is ``%LOCALAPPDATA%\\UrduTranslator\\Models``.
+    The original file on a USB drive is never the install directory.
+    """
+    if _windows():
+        return _ensure(user_data_dir() / "Models")
+    return _ensure(user_data_dir() / "models")
+
+
 def database_path() -> Path:
     """SQLite file that stores translation history."""
     override = os.environ.get("URDU_TRANSLATOR_DATABASE")
     if override:
         return Path(override).expanduser()
+    if _windows():
+        return history_dir() / "history.db"
     return user_data_dir() / "history.db"
+
+
+def log_path() -> Path:
+    """Diagnostic log. Source text is not written here."""
+    if _windows():
+        return logs_dir() / "application.log"
+    return user_data_dir() / "application.log"
+
+
+def window_settings_path() -> Path:
+    """Ini file for the window size. On Linux this stays beside the history file."""
+    if _windows():
+        return config_dir() / "window.ini"
+    return user_data_dir() / "window.ini"
+
+
+def bundled_llama_server() -> Path | None:
+    """A llama-server binary shipped beside the application, when one is present."""
+    name = "llama-server.exe" if _windows() else "llama-server"
+    roots: list[Path] = []
+    if getattr(sys, "frozen", False):
+        roots.append(Path(sys.executable).resolve().parent)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            roots.append(Path(meipass))
+    roots.append(install_root() / "runtime")
+    roots.append(install_root())
+    for root in roots:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
