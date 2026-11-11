@@ -11,6 +11,11 @@ from urdu_translator.errors import TranslationCancelled, TranslationFailedError
 from urdu_translator.translation.backends.llama_server import (
     ServerSettings,
     check_files,
+    compatible_listener,
+    extract_model_argument,
+    is_llama_server_executable,
+    parse_windows_command_line,
+    port_conflict_message,
     reset_for_tests,
     server_command,
     visible_translation,
@@ -185,6 +190,64 @@ def test_a_matching_listener_is_reused_and_not_stopped(tmp_path: Path):
     server.stop()
     assert starts == []
     assert server.owned_pid() is None
+
+
+def test_windows_command_line_parsing_keeps_quoted_paths():
+    command = (
+        r'"C:\Program Files\Urdu Translator\_internal\llama-server.exe" '
+        r'-m "D:\Models\gemma-4-E4B_q4_0-it.gguf" -c 8192 --host 127.0.0.1 --port 8080'
+    )
+    argv = parse_windows_command_line(command)
+    assert argv[0] == r"C:\Program Files\Urdu Translator\_internal\llama-server.exe"
+    assert extract_model_argument(argv) == Path(r"D:\Models\gemma-4-E4B_q4_0-it.gguf")
+    assert is_llama_server_executable(argv[0])
+
+
+def test_compatible_listener_reuses_llama_server_from_another_install_path(tmp_path: Path):
+    model = tmp_path / "gemma-4-E4B_q4_0-it.gguf"
+    model.write_text("weights", encoding="utf-8")
+    configured = tmp_path / "new-build" / "llama-server.exe"
+    configured.parent.mkdir()
+    configured.write_text("new", encoding="utf-8")
+    previous = tmp_path / "Program Files" / "Urdu Translator" / "_internal" / "llama-server.exe"
+    previous.parent.mkdir(parents=True)
+    previous.write_text("old", encoding="utf-8")
+    argv = [str(previous), "-m", str(model), "--host", "127.0.0.1", "--port", "8080"]
+    assert compatible_listener(argv, configured, model) is True
+
+    other_model = tmp_path / "other.gguf"
+    other_model.write_text("other", encoding="utf-8")
+    wrong = [str(previous), "-m", str(other_model)]
+    assert compatible_listener(wrong, configured, model) is False
+    assert compatible_listener(["C:\\Windows\\notepad.exe"], configured, model) is False
+
+
+def test_a_previous_install_listener_is_reused_without_starting_another(tmp_path: Path):
+    model = tmp_path / "gemma-4-E4B_q4_0-it.gguf"
+    model.write_text("weights", encoding="utf-8")
+    configured = tmp_path / "bundled" / "llama-server.exe"
+    configured.parent.mkdir()
+    configured.write_text("new", encoding="utf-8")
+    previous = tmp_path / "old" / "llama-server.exe"
+    previous.parent.mkdir()
+    previous.write_text("old", encoding="utf-8")
+    starts: list[list[str]] = []
+    server = LlamaServer(
+        ServerSettings(binary=configured, model=model),
+        popen=lambda command, **_kwargs: starts.append(command),
+        port_open=lambda: True,
+        listener_argv=lambda: [str(previous), "-m", str(model)],
+    )
+    server.ensure_started()
+    assert starts == []
+    assert server.owned_pid() is None
+
+
+def test_port_conflict_message_leaves_other_programs_running():
+    message = port_conflict_message(8080, [r"C:\Tools\other.exe"])
+    assert "already in use" in message
+    assert "left running" in message
+    assert "other.exe" in message
 
 
 def test_an_unverified_listener_is_a_port_conflict(tmp_path: Path):

@@ -6,7 +6,7 @@ The computer where the translator will be **used** does not need any of these to
 
 The Gemma file `gemma-4-E4B_q4_0-it.gguf` (about 4.9 GB) is **not** part of the installer and must not be committed or copied into `runtime`, `dist`, or `output`.
 
-Nothing in this repository has produced that installer yet. A Windows build has to be run on Windows before the installer exists.
+Application icon: master artwork is the repository root `icon.png`. The multi-resolution `assets\UrduTranslator.ico` is generated from that file and used by PyInstaller and Inno Setup. `assets\UrduTranslator.png` is a separate branded still; it is not a duplicate of `icon.png` and is not used as the executable icon source.
 
 ## Build machine
 
@@ -53,9 +53,9 @@ The script:
 1. Checks that Windows is 64-bit and that Python 3.11 or 3.12 x64 is already available.
 2. Checks that PySide6, python-docx, and PyInstaller are already importable. It does not run pip.
 3. Stops if `runtime\llama-server.exe` is missing, if a Linux binary was left there, or if any `.gguf` file is in `runtime`.
-4. Runs PyInstaller with `UrduTranslator.spec` (onedir, windowed, name `UrduTranslator.exe`).
+4. Runs PyInstaller with `UrduTranslator.spec` (onedir, windowed, name `UrduTranslator.exe`, icon from `assets\UrduTranslator.ico`).
 5. Refuses the result if `UrduTranslator.exe` or `llama-server.exe` is missing, or if a `.gguf` file was packed.
-6. Runs `ISCC` on `installer.iss` only when Inno Setup is already installed.
+6. Runs `ISCC` on `installer.iss` only when Inno Setup is already installed. The installer wizard and shortcuts use the same icon.
 
 Outputs:
 

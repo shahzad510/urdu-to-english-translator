@@ -8,6 +8,7 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from urdu_translator import __version__
 from urdu_translator.gui.fonts import build_app_icon, interface_font, load_bundled_fonts
 from urdu_translator.gui.main_window import MainWindow
 from urdu_translator.paths import log_path
@@ -39,6 +40,7 @@ def main() -> int:
     )
     application = QApplication(sys.argv)
     application.setApplicationName("Urdu to English")
+    application.setApplicationVersion(__version__)
     application.setOrganizationName("UrduTranslator")
     application.setStyle("Fusion")
     configure_logging()
@@ -47,5 +49,6 @@ def main() -> int:
     application.setWindowIcon(build_app_icon())
     window = MainWindow()
     window.show()
+    window.offer_first_launch_guidance()
     window.offer_model_setup()
     return application.exec()

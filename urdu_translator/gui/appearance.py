@@ -73,8 +73,8 @@ QPushButton {
     color: __INK__;
     border: 1px solid __BORDER__;
     border-radius: 8px;
-    padding: 6px 14px;
-    min-height: 28px;
+    padding: 4px 10px;
+    min-height: 24px;
 }
 QPushButton:hover {
     background: __BUTTON_HOVER__;
@@ -96,8 +96,8 @@ QPushButton#PrimaryButton {
     color: __BUTTON_TEXT__;
     border: none;
     font-weight: 600;
-    padding: 6px 18px;
-    min-height: 28px;
+    padding: 4px 14px;
+    min-height: 24px;
 }
 QPushButton#PrimaryButton:hover {
     background: __PRIMARY_HOVER__;

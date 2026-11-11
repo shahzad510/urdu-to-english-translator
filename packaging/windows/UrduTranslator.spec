@@ -12,15 +12,18 @@ root = Path(SPECPATH).resolve().parents[1]
 runtime = Path(SPECPATH) / "runtime"
 template = Path(SPECPATH) / "engine.template.json"
 notice = root / "models" / "gemma-4-e4b" / "NOTICE.txt"
+icon_file = Path(SPECPATH) / "assets" / "UrduTranslator.ico"
+if not icon_file.is_file():
+    icon_file = root / "urdu_translator" / "resources" / "icons" / "UrduTranslator.ico"
 
 datas = [
     (str(template), "models/gemma-4-e4b"),
 ]
 if notice.is_file():
     datas.append((str(notice), "models/gemma-4-e4b"))
-fonts = root / "urdu_translator" / "resources"
-if fonts.is_dir():
-    datas.append((str(fonts), "urdu_translator/resources"))
+resources = root / "urdu_translator" / "resources"
+if resources.is_dir():
+    datas.append((str(resources), "urdu_translator/resources"))
 
 binaries = []
 if runtime.is_dir():
@@ -38,6 +41,7 @@ hidden = [
     "urdu_translator.translation.backends.marian",
     "urdu_translator.translation.backends.indictrans2",
     "urdu_translator.gui.model_setup_dialog",
+    "urdu_translator.gui.model_help_dialog",
     "urdu_translator.gui.flow_layout",
 ]
 
@@ -71,6 +75,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(icon_file) if icon_file.is_file() else None,
 )
 coll = COLLECT(
     exe,

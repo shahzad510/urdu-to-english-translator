@@ -108,7 +108,7 @@ def test_colour_settings_are_gone():
     root = Path(__file__).resolve().parents[1]
     gui = root / "urdu_translator" / "gui"
     assert not (gui / "appearance_dialog.py").exists()
-    sources = "\n".join(path.read_text() for path in gui.glob("*.py"))
+    sources = "\n".join(path.read_text(encoding="utf-8") for path in gui.glob("*.py"))
     for obsolete in (
         "AppearanceDialog",
         "load_appearance",

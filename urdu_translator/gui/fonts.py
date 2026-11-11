@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 
-from urdu_translator.paths import fonts_dir
+from urdu_translator.paths import fonts_dir, package_dir
 
 _preferred_urdu_family: str | None = None
 
@@ -66,8 +68,35 @@ def interface_font(point_size: int = 11) -> QFont:
     return font
 
 
+def icon_asset_path() -> Path | None:
+    """Return the bundled application icon file when it is present on disk."""
+    folder = package_dir() / "resources" / "icons"
+    for name in ("UrduTranslator.ico", "UrduTranslator.png", "icon.png"):
+        path = folder / name
+        if path.is_file():
+            return path
+    root_icon = package_dir().parent / "icon.png"
+    if root_icon.is_file():
+        return root_icon
+    return None
+
+
 def build_app_icon() -> QIcon:
-    """Paint a simple mark so the window has an icon without an extra asset."""
+    """Load the approved application icon for the window and taskbar.
+
+    The master artwork is ``icon.png``. A multi-resolution ``.ico`` is preferred
+    when present. The painted U→E mark is only a last-resort fallback.
+    """
+    path = icon_asset_path()
+    if path is not None:
+        icon = QIcon(str(path))
+        if not icon.isNull():
+            return icon
+    return _fallback_painted_icon()
+
+
+def _fallback_painted_icon() -> QIcon:
+    """Paint a simple mark only when the icon file cannot be loaded."""
     size = 64
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)

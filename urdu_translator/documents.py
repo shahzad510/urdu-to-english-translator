@@ -37,11 +37,11 @@ def read_document(path: Path) -> str:
 
 
 def write_txt(path: Path, text: str) -> None:
-    """Save ``text`` as UTF-8."""
+    """Save ``text`` as UTF-8 with LF newlines on every platform."""
     destination = Path(path)
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(text, encoding="utf-8")
+        destination.write_text(text, encoding="utf-8", newline="\n")
     except OSError as exc:
         raise DocumentError(f"Could not save {destination.name}. {exc}") from exc
 
@@ -113,9 +113,10 @@ def _read_txt(path: Path) -> str:
     data = path.read_bytes()
     for encoding in _TEXT_ENCODINGS:
         try:
-            return data.decode(encoding)
+            text = data.decode(encoding)
         except UnicodeError:
             continue
+        return text.replace("\r\n", "\n").replace("\r", "\n")
     raise DocumentError(f"{path.name} is not valid UTF-8, UTF-16, or Windows Urdu text.")
 
 

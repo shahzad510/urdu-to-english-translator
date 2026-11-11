@@ -45,6 +45,7 @@ class FlowLayout(QLayout):
         self._arrange(rect, apply=True)
 
     def sizeHint(self) -> QSize:
+        """Preferred size keeps items on one row when the parent is wide enough."""
         width = self.spacing() * max(0, len(self._items) - 1)
         height = 0
         for item in self._items:
@@ -58,9 +59,18 @@ class FlowLayout(QLayout):
         )
 
     def minimumSize(self) -> QSize:
+        """Minimum width is the widest child so the parent can shrink and wrap.
+
+        A previous single-row width sum was treated as the window minimum on
+        Windows font metrics and pushed minimumWidth above 960px.
+        """
         size = QSize()
         for item in self._items:
-            size = size.expandedTo(item.minimumSize())
+            hint = item.sizeHint()
+            minimum = item.minimumSize()
+            size = size.expandedTo(
+                QSize(max(hint.width(), minimum.width()), max(hint.height(), minimum.height()))
+            )
         margins = self.contentsMargins()
         size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
         return size

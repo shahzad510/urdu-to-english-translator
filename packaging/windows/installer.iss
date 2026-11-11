@@ -7,6 +7,7 @@
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "UrduTranslator"
 #define MyAppExeName "UrduTranslator.exe"
+#define MyAppIcon "assets\UrduTranslator.ico"
 
 [Setup]
 AppId={{7C3E9A21-4B6D-4E1A-9F2C-8D5A1B0E6C44}
@@ -24,6 +25,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
+SetupIconFile={#MyAppIcon}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupLogging=no
 ; Installation does not contact the network.
@@ -39,8 +41,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "dist\UrduTranslator\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Urdu Translator"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Urdu Translator"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\Urdu Translator"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Urdu Translator"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Urdu Translator"; Flags: nowait postinstall skipifsilent

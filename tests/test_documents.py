@@ -11,6 +11,14 @@ def test_txt_round_trip_keeps_urdu(tmp_path: Path):
     path = tmp_path / "notes.txt"
     write_txt(path, "جمال :۔سلام\n\nشیخ:۔ ٹھیک ہے۔\n")
     assert read_document(path) == "جمال :۔سلام\n\nشیخ:۔ ٹھیک ہے۔\n"
+    # write_txt must not expand LF to platform CRLF on Windows.
+    assert b"\r" not in path.read_bytes()
+
+
+def test_txt_read_normalizes_crlf_from_external_files(tmp_path: Path):
+    path = tmp_path / "external.txt"
+    path.write_bytes("جمال :۔سلام\r\n\r\nشیخ:۔ ٹھیک ہے۔\r\n".encode("utf-8"))
+    assert read_document(path) == "جمال :۔سلام\n\nشیخ:۔ ٹھیک ہے۔\n"
 
 
 def test_docx_table_keeps_field_pairs_and_speaker_lines(tmp_path: Path):

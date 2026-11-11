@@ -57,3 +57,5 @@ models/gemma-4-e4b/*
 !models/gemma-4-e4b/engine.json
 !models/gemma-4-e4b/NOTICE.txt
 
+/runtime/
+/release-backup-*/

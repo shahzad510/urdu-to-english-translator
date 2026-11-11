@@ -14,23 +14,32 @@ if (-not [Environment]::Is64BitOperatingSystem) {
     Fail "This build requires 64-bit Windows."
 }
 
-$Python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $Python) {
-    Fail "Python was not found. Install Python 3.11 or 3.12 x64 on the build machine before running this script. This script will not download it."
+$Python = Join-Path $Root ".venv\Scripts\python.exe"
+
+if (-not (Test-Path $Python)) {
+    Fail "Project virtual environment Python was not found at $Python."
 }
 
-$Version = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print(sys.maxsize > 2**32)"
+$Version = & $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print(sys.maxsize > 2**32)"
 $Lines = $Version -split "`n"
-if ($Lines[0] -notin @("3.11", "3.12")) {
-    Fail "Python 3.11 or 3.12 is required. Found $($Lines[0]). This script will not install another Python."
+
+if ($Lines[0].Trim() -notin @("3.11", "3.12")) {
+    Fail "Python 3.11 or 3.12 is required. Found $($Lines[0])."
 }
+
 if ($Lines[1].Trim() -ne "True") {
     Fail "Python is not 64-bit."
 }
 
-& python -c "import PySide6, docx, PyInstaller" 
+& $Python -c "import PySide6, docx, PyInstaller"
+
 if ($LASTEXITCODE -ne 0) {
-    Fail "PySide6, python-docx, and PyInstaller must already be installed in this Python. Install them from a local copy. This script will not use pip to download them."
+    Fail "Required build packages are missing from the project virtual environment."
+}
+
+$Icon = Join-Path $PSScriptRoot "assets\UrduTranslator.ico"
+if (-not (Test-Path $Icon)) {
+    Fail "Missing packaging\windows\assets\UrduTranslator.ico. Generate it from the repository root icon.png before building."
 }
 
 $Runtime = Join-Path $PSScriptRoot "runtime"
@@ -49,7 +58,7 @@ $Work = Join-Path $PSScriptRoot "build"
 if (Test-Path $Dist) { Remove-Item $Dist -Recurse -Force }
 if (Test-Path $Work) { Remove-Item $Work -Recurse -Force }
 
-& python -m PyInstaller --noconfirm --distpath $Dist --workpath $Work (Join-Path $PSScriptRoot "UrduTranslator.spec")
+& $Python -m PyInstaller --noconfirm --distpath $Dist --workpath $Work (Join-Path $PSScriptRoot "UrduTranslator.spec")
 if ($LASTEXITCODE -ne 0) {
     Fail "PyInstaller did not produce the application."
 }

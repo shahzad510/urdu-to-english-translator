@@ -164,12 +164,10 @@ class LlamaServer:
             self._owned_pid = None
             if self._endpoint_open():
                 argv = self._listener()
-                if argv is not None and _command_matches(argv, self.settings.binary, self.settings.model):
+                if argv is not None and compatible_listener(argv, self.settings.binary, self.settings.model):
                     return
                 raise TranslationFailedError(
-                    f"Port {self.settings.port} on {LOCAL_HOST} is already in use. "
-                    "The program listening there is not the configured llama-server "
-                    "and model, so it was left running."
+                    port_conflict_message(self.settings.port, argv)
                 )
             check_files(self.settings.model, self.settings.binary)
             self._spawn()
@@ -381,18 +379,23 @@ def reset_for_tests() -> None:
             _SERVER.stop()
         _SERVER = None
 
-
 def listening_command(host: str, port: int) -> list[str] | None:
-    """Return the command line of the process listening on host:port, when it can be read."""
+    """Return the command line of the process listening on host:port."""
     if host != LOCAL_HOST:
         return None
+
+    if sys.platform == "win32":
+        return _windows_listening_command(port)
+
     inode = _listen_inode(port)
     if inode is None:
         return None
+
     needle = f"socket:[{inode}]"
     proc = Path("/proc")
     if not proc.is_dir():
         return None
+
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
@@ -401,18 +404,169 @@ def listening_command(host: str, port: int) -> list[str] | None:
             descriptors = list(fd_dir.iterdir())
         except OSError:
             continue
+
         for descriptor in descriptors:
             try:
                 if os.readlink(descriptor) != needle:
                     continue
             except OSError:
                 continue
+
             try:
                 raw = (entry / "cmdline").read_bytes()
             except OSError:
                 return None
-            return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+            return [
+                part.decode("utf-8", "replace")
+                for part in raw.split(b"\0")
+                if part
+            ]
+
     return None
+
+
+def parse_windows_command_line(command_line: str) -> list[str]:
+    """Split a Windows process CommandLine, respecting quotes around paths."""
+    import shlex
+
+    text = command_line.strip()
+    if not text:
+        return []
+    try:
+        parts = shlex.split(text, posix=False)
+    except ValueError:
+        parts = _split_windows_command_fallback(text)
+    return [_strip_windows_quotes(part) for part in parts]
+
+
+def _strip_windows_quotes(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        return text[1:-1]
+    return text
+
+
+def extract_model_argument(argv: list[str]) -> Path | None:
+    """Return the GGUF path from ``-m`` / ``--model`` when present."""
+    if not argv:
+        return None
+    for flag in ("-m", "--model"):
+        if flag not in argv:
+            continue
+        index = argv.index(flag)
+        if index + 1 >= len(argv):
+            return None
+        raw = _strip_windows_quotes(argv[index + 1])
+        if not raw:
+            return None
+        return Path(raw)
+    return None
+
+
+def is_llama_server_executable(path: Path | str) -> bool:
+    """True when the path names a llama-server binary."""
+    name = Path(path).name.casefold()
+    return name in {"llama-server", "llama-server.exe"}
+
+
+def compatible_listener(argv: list[str], binary: Path, model: Path) -> bool:
+    """Reuse a listener when it is llama-server for the same model file.
+
+    Install path may differ (for example Program Files vs a newer build under
+    ``_internal``). An unrelated process on the port is never treated as a match.
+    """
+    return _command_matches(argv, binary, model)
+
+
+def port_conflict_message(port: int, argv: list[str] | None) -> str:
+    """Explain a busy port without stopping the other process."""
+    base = (
+        f"Port {port} on {LOCAL_HOST} is already in use. "
+        "The program listening there was left running."
+    )
+    if not argv:
+        return (
+            f"{base} The listener could not be identified, so a second "
+            "llama-server was not started."
+        )
+    exe = argv[0] if argv else "unknown"
+    model = extract_model_argument(argv)
+    if is_llama_server_executable(exe) and model is not None:
+        return (
+            f"{base} Another llama-server is running from {exe} with model "
+            f"{model}, which is not the configured model for this session."
+        )
+    if is_llama_server_executable(exe):
+        return (
+            f"{base} Another llama-server is running from {exe}, but its model "
+            "argument could not be verified against the configured GGUF."
+        )
+    return (
+        f"{base} The listener ({exe}) is not the configured llama-server "
+        "and model."
+    )
+
+
+def _windows_listening_command(port: int) -> list[str] | None:
+    """Read the Windows listener command line. Failures return None."""
+    script = (
+        f"$ErrorActionPreference = 'SilentlyContinue'; "
+        f"$connection = Get-NetTCPConnection -LocalAddress '{LOCAL_HOST}' "
+        f"-LocalPort {int(port)} -State Listen | Select-Object -First 1; "
+        "if (-not $connection) { exit 0 }; "
+        "$process = Get-CimInstance Win32_Process "
+        "-Filter \"ProcessId = $($connection.OwningProcess)\"; "
+        "if ($process -and $process.CommandLine) { "
+        "[Console]::Out.Write($process.CommandLine) }"
+    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    text = (result.stdout or "").strip()
+    if not text:
+        # Missing PowerShell, access denied, or no listener: leave port handling
+        # to the caller, which reports an unidentified busy port.
+        return None
+    parsed = parse_windows_command_line(text)
+    return parsed or None
+
+
+def _split_windows_command_fallback(text: str) -> list[str]:
+    """Split a quoted Windows command line when shlex cannot."""
+    parts: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    for char in text:
+        if char == '"':
+            in_quotes = not in_quotes
+            continue
+        if char.isspace() and not in_quotes:
+            if current:
+                parts.append("".join(current))
+                current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append("".join(current))
+    return parts
 
 
 def _listen_inode(port: int) -> str | None:
@@ -455,24 +609,33 @@ def _tcp_open(host: str, port: int) -> bool:
 def _command_matches(argv: list[str], binary: Path, model: Path) -> bool:
     if not argv:
         return False
+
+    exe = Path(str(argv[0]).strip().strip('"'))
+    if not is_llama_server_executable(exe):
+        return False
+
     try:
-        same_binary = Path(argv[0]).resolve() == binary.resolve()
+        same_binary = exe.resolve() == Path(binary).resolve()
     except OSError:
         same_binary = False
-    model_text = ""
-    for flag in ("-m", "--model"):
-        if flag in argv:
-            index = argv.index(flag)
-            if index + 1 < len(argv):
-                model_text = argv[index + 1]
-                break
-    if not model_text:
+
+    # Same llama-server binary name is enough when the model path matches.
+    # This allows reusing a previous install under Program Files\_internal
+    # from a newer build that ships its own copy of llama-server.exe.
+    compatible_binary = same_binary or is_llama_server_executable(binary)
+    if not compatible_binary:
+        return False
+
+    listener_model = extract_model_argument(argv)
+    if listener_model is None:
         return False
     try:
-        same_model = Path(model_text).resolve() == model.resolve()
+        return listener_model.resolve() == Path(model).resolve()
     except OSError:
-        same_model = False
-    return same_binary and same_model
+        try:
+            return Path(str(listener_model)).as_posix().casefold() == Path(str(model)).as_posix().casefold()
+        except OSError:
+            return False
 
 
 def _chat_payload(system: str, user: str, settings: ServerSettings) -> dict:

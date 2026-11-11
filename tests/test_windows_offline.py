@@ -232,10 +232,18 @@ def test_offline_helpers_do_not_name_a_download_url():
         assert "https://" not in text
     spec = (root / "packaging/windows/UrduTranslator.spec").read_text(encoding="utf-8")
     assert "Refusing to bundle a GGUF model" in spec
+    assert "UrduTranslator.ico" in spec
     installer = (root / "packaging/windows/installer.iss").read_text(encoding="utf-8")
     assert "UrduTranslator-Setup-1.0.0-x64" in installer
     assert "LOCALAPPDATA" in installer
     assert ".gguf" in installer.lower()
+    assert "SetupIconFile" in installer
+    assert "IconFilename" in installer
+    icon = root / "packaging" / "windows" / "assets" / "UrduTranslator.ico"
+    assert icon.is_file()
+    assert icon.stat().st_size > 1000
+    bundled = root / "urdu_translator" / "resources" / "icons" / "UrduTranslator.ico"
+    assert bundled.is_file()
 
 
 @pytest.fixture
@@ -299,3 +307,85 @@ def test_a_ready_model_is_reused_without_the_dialog(qapp, tmp_path: Path, monkey
         assert window.statusBar().currentMessage() == READY_STATUS
     finally:
         window.close()
+
+
+def test_model_help_dialog_persists_dont_show_again(qapp, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("URDU_TRANSLATOR_DATA", str(tmp_path / "data"))
+    window = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    opened: list[str] = []
+
+    class FakeHelp:
+        def __init__(self, parent=None, *, model_ready: bool = False) -> None:
+            self._ready = model_ready
+
+        def exec(self) -> int:
+            opened.append("help")
+            return 1
+
+        def dont_show_again(self) -> bool:
+            return True
+
+        def wants_setup(self) -> bool:
+            return False
+
+    monkeypatch.setattr("urdu_translator.gui.model_help_dialog.ModelHelpDialog", FakeHelp)
+    monkeypatch.setattr(
+        "urdu_translator.gui.main_window.inspect_engine",
+        lambda _path: EngineStatus("missing", "No model loaded", "missing"),
+    )
+    try:
+        assert window._skip_model_help() is False
+        window.show_model_installation_help(offer_setup_on_start=False)
+        assert opened == ["help"]
+        assert window._skip_model_help() is True
+        window.offer_first_launch_guidance()
+        assert opened == ["help"]
+        menu_texts = []
+        for action in window.menuBar().actions():
+            menu = action.menu()
+            if menu is not None:
+                menu_texts.extend(item.text() for item in menu.actions())
+        assert "Gemma Model Installation" in menu_texts
+    finally:
+        window.close()
+
+
+def test_ready_model_help_does_not_claim_setup_is_incomplete(qapp, tmp_path: Path):
+    from PySide6.QtWidgets import QLabel
+
+    from urdu_translator.gui.model_help_dialog import ModelHelpDialog
+
+    window = MainWindow(models_directory=tmp_path / "models", history_database=tmp_path / "history.db")
+    try:
+        dialog = ModelHelpDialog(window, model_ready=True)
+        qapp.processEvents()
+        text = " ".join(label.text() for label in dialog.findChildren(QLabel))
+        assert EXPECTED_GGUF in text
+        assert "Models" in text or "model folder" in text.lower()
+        assert READY_STATUS in text
+        assert "not configured yet" not in text
+        assert dialog.start_button.text() == "Close"
+        dialog.close()
+    finally:
+        window.close()
+
+
+def test_application_icon_loads_from_bundled_asset(qapp):
+    from urdu_translator.gui.fonts import build_app_icon, icon_asset_path
+
+    path = icon_asset_path()
+    assert path is not None
+    assert path.suffix.lower() in {".ico", ".png"}
+    icon = build_app_icon()
+    assert icon is not None
+    assert not icon.isNull()
+    pixmap = icon.pixmap(32, 32)
+    assert not pixmap.isNull()
+
+
+def test_application_version_matches_installer():
+    from urdu_translator import __version__
+
+    assert __version__ == "1.0.0"
+    installer = Path(__file__).resolve().parents[1] / "packaging" / "windows" / "installer.iss"
+    assert 'MyAppVersion "1.0.0"' in installer.read_text(encoding="utf-8")

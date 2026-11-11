@@ -6,8 +6,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QTextCursor
+from PySide6.QtCore import QByteArray, QEvent, QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QResizeEvent, QShowEvent, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -51,14 +51,20 @@ _STATUS_OUTDATED = "Translation edited — summary is outdated"
 _STATUS_GENERATING = "Generating summary..."
 _STATUS_FAILED = "Summary generation failed"
 _SUMMARY_LEVELS = (("brief", "Brief"), ("detailed", "Detailed"), ("expanded", "Expanded"))
+_SKIP_MODEL_HELP_KEY = "help/hide_gemma_model_installation"
 
 
 class _WrappingButtons(QWidget):
-    """A button row that uses a second line instead of drawing past its parent."""
+    """A button row that uses a second line instead of drawing past its parent.
+
+    QVBoxLayout will not always reserve height-for-width space on its own, so
+    this widget raises its minimum height when it wraps. That keeps Export Gist
+    and the translation actions inside the panel instead of painting past it.
+    """
 
     def __init__(self, buttons: tuple[QPushButton, ...]) -> None:
         super().__init__()
-        self._row = FlowLayout(self, spacing=8)
+        self._row = FlowLayout(self, spacing=6)
         for button in buttons:
             self._row.addWidget(button)
         policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
@@ -69,13 +75,31 @@ class _WrappingButtons(QWidget):
         return True
 
     def heightForWidth(self, width: int) -> int:
-        return self._row.heightForWidth(width)
+        return self._row.heightForWidth(max(0, width))
 
     def minimumSizeHint(self) -> QSize:
         return self._row.minimumSize()
 
     def sizeHint(self) -> QSize:
-        return self._row.sizeHint()
+        preferred = self._row.sizeHint()
+        width = self.width() if self.width() > 0 else preferred.width()
+        return QSize(preferred.width(), self.heightForWidth(width))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._sync_wrapped_height(event.size().width())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._sync_wrapped_height(self.width())
+
+    def _sync_wrapped_height(self, width: int) -> None:
+        if width <= 0:
+            return
+        needed = max(1, self.heightForWidth(width))
+        if self.minimumHeight() != needed:
+            self.setMinimumHeight(needed)
+            self.updateGeometry()
 
 
 class MainWindow(QMainWindow):
@@ -95,6 +119,8 @@ class MainWindow(QMainWindow):
         self._placed = False
         self._pending_maximize = False
         self._sharing_details = False
+        self._enforcing_layout = False
+        self._skip_layout_enforce = False
         self._user_sized_details = False
         self._gist_state = "empty"
         self._gist_running = False
@@ -114,6 +140,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(760, 640)
         self.resize(1200, 760)
         self._build_ui()
+        self._build_menus()
         self._apply_theme()
         self._prepare_storage()
         self.refresh_model_status()
@@ -126,8 +153,8 @@ class MainWindow(QMainWindow):
         root.setObjectName("Root")
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(22, 18, 22, 12)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 12, 16, 8)
+        layout.setSpacing(8)
 
         layout.addLayout(self._build_header())
 
@@ -162,9 +189,11 @@ class MainWindow(QMainWindow):
             placeholder=_GIST_PLACEHOLDER,
         )
         self.gist_editor.setReadOnly(True)
+        # Keep the gist editor at its historical 100px floor; Urdu/English can
+        # be slightly tighter so wrapped action rows still fit at ~900x620.
         self.gist_editor.setMinimumHeight(100)
-        self.urdu_editor.setMinimumHeight(80)
-        self.english_editor.setMinimumHeight(80)
+        self.urdu_editor.setMinimumHeight(64)
+        self.english_editor.setMinimumHeight(64)
         for editor in (self.urdu_editor, self.english_editor, self.gist_editor):
             editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.gist_editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -239,24 +268,33 @@ class MainWindow(QMainWindow):
         title.setObjectName("Title")
         subtitle = QLabel("Offline desktop translator")
         subtitle.setObjectName("Subtitle")
+        # Avoid a long subtitle forcing the whole window's minimum width above
+        # the layout tests' bound on Windows font metrics.
+        subtitle.setWordWrap(True)
         titles.addWidget(title)
         titles.addWidget(subtitle)
-        header.addLayout(titles)
-        header.addStretch(1)
+        titles.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
+        header.addLayout(titles, stretch=1)
 
         self.export_complete_button = QPushButton("Export Complete Document")
         self.export_complete_button.clicked.connect(self.export_docx)
-        header.addWidget(self.export_complete_button)
 
         self.history_button = QPushButton("History")
         self.history_button.clicked.connect(self.show_history)
-        header.addWidget(self.history_button)
 
         self.model_pill = QPushButton("Checking model…")
         self.model_pill.setObjectName("ModelPill")
         self.model_pill.setCursor(Qt.CursorShape.PointingHandCursor)
         self.model_pill.clicked.connect(self.show_model_details)
-        header.addWidget(self.model_pill)
+        # Wrap like the panel actions so Segoe/Sans metrics cannot push the
+        # non-wrapping header past a 960px minimum width.
+        header.addWidget(
+            self._button_row(
+                self.export_complete_button,
+                self.history_button,
+                self.model_pill,
+            )
+        )
         return header
 
     def _build_panel(
@@ -271,10 +309,11 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName(object_name)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 8)
+        layout.setSpacing(4)
 
         heading = QHBoxLayout()
+        heading.setSpacing(6)
         label = QLabel(title)
         label.setObjectName("PanelTitle")
         heading.addWidget(label)
@@ -315,10 +354,10 @@ class MainWindow(QMainWindow):
     def _build_english_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("EnglishPanel")
-        panel.setMinimumHeight(140)
+        panel.setMinimumHeight(120)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 8)
+        layout.setSpacing(4)
 
         title = QLabel("English Translation")
         title.setObjectName("PanelTitle")
@@ -347,13 +386,13 @@ class MainWindow(QMainWindow):
     def _build_gist_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("GistPanel")
-        panel.setMinimumHeight(180)
+        panel.setMinimumHeight(160)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 10, 12, 8)
+        layout.setSpacing(4)
 
         heading = QHBoxLayout()
-        heading.setSpacing(8)
+        heading.setSpacing(6)
         label = QLabel("Gist / Contextual Summary")
         label.setObjectName("PanelTitle")
         heading.addWidget(label)
@@ -369,7 +408,7 @@ class MainWindow(QMainWindow):
 
         self.level_buttons: dict[str, QRadioButton] = {}
         level_host = QWidget()
-        levels = FlowLayout(level_host, spacing=8)
+        levels = FlowLayout(level_host, spacing=6)
         for level, name in _SUMMARY_LEVELS:
             button = QRadioButton(name)
             button.setAutoExclusive(True)
@@ -391,7 +430,7 @@ class MainWindow(QMainWindow):
         ))
 
         status = QHBoxLayout()
-        status.setSpacing(8)
+        status.setSpacing(6)
         status_title = QLabel("Summary Status")
         status_title.setObjectName("PanelCaption")
         self.summary_status = QLabel("")
@@ -405,7 +444,7 @@ class MainWindow(QMainWindow):
         self.gist_progress = QProgressBar()
         self.gist_progress.setRange(0, 0)
         self.gist_progress.setTextVisible(False)
-        self.gist_progress.setFixedHeight(6)
+        self.gist_progress.setFixedHeight(4)
         self.gist_progress.hide()
         layout.addWidget(self.gist_progress)
 
@@ -477,6 +516,13 @@ class MainWindow(QMainWindow):
         apply_editor_colors(self.english_editor)
         apply_editor_colors(self.gist_editor)
 
+    def _build_menus(self) -> None:
+        """Add a Help menu without changing the main editor layout."""
+        help_menu = self.menuBar().addMenu("&Help")
+        install_action = QAction("Gemma Model Installation", self)
+        install_action.triggered.connect(self.show_model_installation_help)
+        help_menu.addAction(install_action)
+
     def show_model_details(self) -> None:
         """Show the model status, or the setup dialog when the model is missing."""
         status = self.refresh_model_status()
@@ -484,6 +530,31 @@ class MainWindow(QMainWindow):
             self.offer_model_setup()
             return
         self._show_banner(status.message, kind="info")
+
+    def show_model_installation_help(self, *, offer_setup_on_start: bool = True) -> None:
+        """Open the Gemma installation guidance from Help or first launch."""
+        status = self.refresh_model_status()
+        model_ready = status.state == "ready"
+        from urdu_translator.gui.model_help_dialog import ModelHelpDialog
+
+        dialog = ModelHelpDialog(self, model_ready=model_ready)
+        result = dialog.exec()
+        if dialog.dont_show_again():
+            self._set_skip_model_help(True)
+        if offer_setup_on_start and result and dialog.wants_setup():
+            self.offer_model_setup()
+        elif model_ready:
+            self.statusBar().showMessage("AI Model Ready — Offline Mode")
+
+    def offer_first_launch_guidance(self) -> None:
+        """Show model installation help once unless the user opted out.
+
+        Setup itself is left to :meth:`offer_model_setup` so the browse dialog
+        is not opened twice on startup.
+        """
+        if self._skip_model_help():
+            return
+        self.show_model_installation_help(offer_setup_on_start=False)
 
     def offer_model_setup(self) -> None:
         """Open the Gemma setup dialog when the offline model is not ready.
@@ -804,7 +875,11 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
         super().resizeEvent(event)
-        if not self._user_sized_details:
+        # Defer until child geometries match the new size; otherwise wrapped
+        # rows are measured against the previous width and Export Gist clips.
+        if self._placed:
+            QTimer.singleShot(0, self._enforce_layout_after_resize)
+        elif not self._user_sized_details:
             self._share_detail_height()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API
@@ -816,10 +891,31 @@ class MainWindow(QMainWindow):
         if not self._restore_window_state():
             self._center_on_screen()
         self._clamp_to_available_screen()
+        self._enforce_layout_minimum()
         self._share_detail_height()
         if self._pending_maximize:
             self._pending_maximize = False
             self.showMaximized()
+
+    def _enforce_layout_after_resize(self) -> None:
+        if not self._placed or self.isMaximized() or self.isMinimized():
+            return
+        if self._skip_layout_enforce:
+            self._skip_layout_enforce = False
+            return
+        self._enforce_layout_minimum()
+        if not self._user_sized_details:
+            self._share_detail_height()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        # Maximize/restore must keep the pre-maximize geometry. A deferred
+        # layout pass after showNormal can rewrite width back to the minimum.
+        if event.type() == QEvent.Type.WindowStateChange:
+            before = event.oldState() if hasattr(event, "oldState") else None
+            if before is not None and bool(before & Qt.WindowState.WindowMaximized):
+                if not self.isMaximized():
+                    self._skip_layout_enforce = True
+        super().changeEvent(event)
 
     def _open_path(self, path: str) -> None:
         if self._busy:
@@ -1274,21 +1370,104 @@ class MainWindow(QMainWindow):
 
     def _enforce_layout_minimum(self) -> None:
         """Stop the window shrinking until buttons are pushed outside it."""
-        for panel in (self._english_panel, self._gist_panel):
-            layout = panel.layout()
-            if layout is None:
+        if self._enforcing_layout:
+            return
+        self._enforcing_layout = True
+        try:
+            # Sync wrapped action rows to the detail column width before measuring.
+            column_width = max(
+                self.detail_splitter.width(),
+                self.detail_splitter.minimumWidth(),
+                600,
+            )
+            inner_width = max(120, column_width - 24)
+            for row in self.findChildren(_WrappingButtons):
+                row._sync_wrapped_height(inner_width)
+            for panel, floor in (
+                (self._english_panel, 120),
+                (self._gist_panel, 160),
+            ):
+                needed = self._panel_height_for_width(panel, column_width)
+                layout_needed = 0
+                layout = panel.layout()
+                if layout is not None:
+                    layout_needed = layout.minimumSize().height()
+                target = max(floor, needed, layout_needed)
+                if panel.minimumHeight() != target:
+                    panel.setMinimumHeight(target)
+            central = self.centralWidget()
+            if central is not None:
+                central.updateGeometry()
+            hint = (
+                central.minimumSizeHint()
+                if central is not None
+                else self.minimumSizeHint()
+            )
+            menu_height = 0
+            bar = self.menuBar()
+            if bar is not None and not bar.isNativeMenuBar():
+                menu_height = max(0, bar.sizeHint().height())
+            width = max(760, hint.width())
+            height = max(640, hint.height() + menu_height)
+            old_min_h = self.minimumHeight()
+            old_h = self.height()
+            if self.minimumWidth() != width or self.minimumHeight() != height:
+                self.setMinimumSize(width, height)
+            # Qt grows the window when the minimum increases. If the window was
+            # still exactly on the old minimum and wrapping now needs less
+            # height (wider layout), shrink back so height stays equal to the
+            # minimum — required by the resize/minimize geometry checks.
+            if (
+                not self.isMaximized()
+                and not self.isMinimized()
+                and old_h == old_min_h
+                and height < old_min_h
+            ):
+                self.resize(self.width(), height)
+        finally:
+            self._enforcing_layout = False
+
+    @staticmethod
+    def _panel_height_for_width(panel: QWidget, width: int) -> int:
+        """Minimum panel height when action rows wrap at ``width``."""
+        layout = panel.layout()
+        if layout is None:
+            return panel.minimumHeight()
+        margins = layout.contentsMargins()
+        inner = max(1, width - margins.left() - margins.right())
+        total = margins.top() + margins.bottom()
+        counted = 0
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None:
                 continue
-            needed = layout.minimumSize().height()
-            if needed > panel.minimumHeight():
-                panel.setMinimumHeight(needed)
-        hint = self.minimumSizeHint()
-        width = max(760, hint.width())
-        height = max(640, hint.height())
-        if self.minimumWidth() != width or self.minimumHeight() != height:
-            self.setMinimumSize(width, height)
+            widget = item.widget()
+            if widget is not None:
+                if not widget.isVisible() and widget is not panel:
+                    # Hidden progress bars must not reserve space in the minimum.
+                    continue
+                if widget.hasHeightForWidth():
+                    total += widget.heightForWidth(inner)
+                else:
+                    total += max(widget.minimumHeight(), widget.minimumSizeHint().height())
+            elif item.layout() is not None:
+                total += item.layout().minimumSize().height()
+            else:
+                total += item.minimumSize().height()
+            counted += 1
+        if counted > 1:
+            total += layout.spacing() * (counted - 1)
+        return total
 
     def _window_settings(self) -> QSettings:
         return QSettings(str(window_settings_path()), QSettings.Format.IniFormat)
+
+    def _skip_model_help(self) -> bool:
+        value = self._window_settings().value(_SKIP_MODEL_HELP_KEY, False)
+        return str(value).lower() in {"true", "1", "yes"}
+
+    def _set_skip_model_help(self, skip: bool) -> None:
+        self._window_settings().setValue(_SKIP_MODEL_HELP_KEY, bool(skip))
 
     def _restore_window_state(self) -> bool:
         """Return True when a saved size and position could be applied."""

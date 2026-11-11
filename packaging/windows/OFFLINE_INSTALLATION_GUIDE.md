@@ -28,13 +28,14 @@ On a computer that is allowed to use the internet:
 
 1. Plug the USB drive into this offline computer.
 2. Start **Urdu Translator**.
-3. The window **Gemma AI Model Setup** opens because the model is not on this computer yet.
-4. Click **Browse for Model** and select `gemma-4-E4B_q4_0-it.gguf` on the USB drive. A folder on this computer is also fine if you already copied the file there.
-5. Choose one of the two options:
+3. The **Gemma Model Installation** help screen explains that the model arrives on USB. You can open `%LOCALAPPDATA%\UrduTranslator\Models\` from that screen. Tick **Don't show this again** if you do not want the help screen on every start. Reopen it later from **Help → Gemma Model Installation**.
+4. The window **Gemma AI Model Setup** opens because the model is not configured yet.
+5. Click **Browse for Model** and select `gemma-4-E4B_q4_0-it.gguf` on the USB drive. A folder on this computer is also fine if you already copied the file there.
+6. Choose one of the two options:
    - **Keep model at its current location** if the USB drive will stay connected while you translate.
-   - **Copy model to the recommended local model directory** if you want a copy on this computer. The copy is placed in `%LOCALAPPDATA%\UrduTranslator\Models\`. The file on the USB drive is not deleted or changed. Copying 4.9 GB takes a while. The progress bar shows how far the copy has got.
-6. Click **Verify Model**. The application checks that the file can be read and asks the local translation program to open it. Nothing is downloaded.
-7. When the status says **AI Model Ready — Offline Mode**, you can translate.
+   - **Copy model to the recommended local model directory** if you want a copy on this computer. The copy is placed in `%LOCALAPPDATA%\UrduTranslator\Models\`. Example: `C:\Users\Admin\AppData\Local\UrduTranslator\Models\gemma-4-E4B_q4_0-it.gguf`. The file on the USB drive is not deleted or changed. Copying 4.9 GB takes a while. The progress bar shows how far the copy has got.
+7. Click **Verify Model**. The application checks that the file can be read and asks the local translation program to open it. Nothing is downloaded.
+8. When the status says **AI Model Ready — Offline Mode**, you can translate.
 
 The next time you start the application it remembers that file. It asks again only if the file is missing, for example when the USB drive is unplugged and you had chosen to keep the model there. Reconnect the drive, or browse to another copy. The application will not fetch a model from the internet.
 
